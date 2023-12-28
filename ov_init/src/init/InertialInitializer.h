@@ -61,11 +61,12 @@ class InertialInitializer {
 
 public:
   /**
-   * @brief Default constructor
+   * @brief Default constructor 内部维护了一个静态初始化器和一个动态初始化器
    * @param params_ Parameters loaded from either ROS or CMDLINE
    * @param db Feature tracker database with all features in it
    */
-  explicit InertialInitializer(InertialInitializerOptions &params_, std::shared_ptr<ov_core::FeatureDatabase> db);
+  explicit InertialInitializer(InertialInitializerOptions &params_, 
+                               std::shared_ptr<ov_core::FeatureDatabase> db);
 
   /**
    * @brief Feed function for inertial data

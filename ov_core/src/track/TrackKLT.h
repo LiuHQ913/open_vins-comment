@@ -51,8 +51,16 @@ public:
    * @param gridy size of grid in the y-direction / v-direction
    * @param minpxdist features need to be at least this number pixels away from each other
    */
-  explicit TrackKLT(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
-                    HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist)
+  explicit TrackKLT(std::unordered_map<size_t, 
+                    std::shared_ptr<CamBase>> cameras, 
+                    int numfeats, 
+                    int numaruco, 
+                    bool stereo,
+                    HistogramMethod histmethod, 
+                    int fast_threshold, 
+                    int gridx, 
+                    int gridy, 
+                    int minpxdist)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod), threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
         min_px_dist(minpxdist) {}
 

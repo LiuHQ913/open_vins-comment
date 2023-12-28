@@ -50,8 +50,16 @@ public:
    * @param minpxdist features need to be at least this number pixels away from each other
    * @param knnratio matching ratio needed (smaller value forces top two descriptors during match to be more different)
    */
-  explicit TrackDescriptor(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
-                           HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist, double knnratio)
+  explicit TrackDescriptor(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, 
+                           int numfeats, 
+                           int numaruco, 
+                           bool stereo,
+                           HistogramMethod histmethod, 
+                           int fast_threshold, 
+                           int gridx, 
+                           int gridy, 
+                           int minpxdist, 
+                           double knnratio)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod), threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
         min_px_dist(minpxdist), knn_ratio(knnratio) {}
 

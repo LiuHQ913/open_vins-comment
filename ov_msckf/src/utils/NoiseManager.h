@@ -30,6 +30,7 @@ namespace ov_msckf {
 
 /**
  * @brief Struct of our imu noise parameters
+ *        white noise & covariance，random walk & covariance
  */
 struct NoiseManager {
 

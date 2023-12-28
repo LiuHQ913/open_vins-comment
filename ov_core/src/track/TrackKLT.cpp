@@ -392,7 +392,9 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   PRINT_ALL("[TIME-KLT]: %.4f seconds for total\n", (rT6 - rT1).total_microseconds() * 1e-6);
 }
 
-void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
+void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, 
+                                           const cv::Mat &mask0, 
+                                           std::vector<cv::KeyPoint> &pts0,
                                            std::vector<size_t> &ids0) {
 
   // Create a 2D occupancy grid for this current image

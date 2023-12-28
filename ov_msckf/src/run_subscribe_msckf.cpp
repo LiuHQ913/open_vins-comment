@@ -46,6 +46,7 @@ std::shared_ptr<ROS2Visualizer> viz;
 int main(int argc, char **argv) {
 
   // Ensure we have a path, if the user passes it then we should use it
+  // $(find ov_msckf)/../config/$(arg config)/estimator_config.yaml
   std::string config_path = "unset_path_to_config.yaml";
   if (argc > 1) {
     config_path = argv[1];
@@ -83,7 +84,7 @@ int main(int argc, char **argv) {
   VioManagerOptions params;
   params.print_and_load(parser);
   params.use_multi_threading_subs = true;
-  sys = std::make_shared<VioManager>(params);
+  sys = std::make_shared<VioManager>(params); // todo flag
 #if ROS_AVAILABLE == 1
   viz = std::make_shared<ROS1Visualizer>(nh, sys);
   viz->setup_subscribers(parser);

@@ -85,7 +85,10 @@ public:
    * @param stereo if we should do stereo feature tracking or binocular
    * @param histmethod what type of histogram pre-processing should be done (histogram eq?)
    */
-  TrackBase(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
+  TrackBase(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, 
+            int numfeats, 
+            int numaruco, 
+            bool stereo,
             HistogramMethod histmethod);
 
   virtual ~TrackBase() {}

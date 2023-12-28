@@ -39,18 +39,23 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 
-UpdaterZeroVelocity::UpdaterZeroVelocity(UpdaterOptions &options, NoiseManager &noises, std::shared_ptr<ov_core::FeatureDatabase> db,
-                                         std::shared_ptr<Propagator> prop, double gravity_mag, double zupt_max_velocity,
-                                         double zupt_noise_multiplier, double zupt_max_disparity)
+UpdaterZeroVelocity::UpdaterZeroVelocity(UpdaterOptions &options, 
+                                         NoiseManager &noises, 
+                                         std::shared_ptr<ov_core::FeatureDatabase> db,
+                                         std::shared_ptr<Propagator> prop, 
+                                         double gravity_mag, 
+                                         double zupt_max_velocity,
+                                         double zupt_noise_multiplier, 
+                                         double zupt_max_disparity)
     : _options(options), _noises(noises), _db(db), _prop(prop), _zupt_max_velocity(zupt_max_velocity),
-      _zupt_noise_multiplier(zupt_noise_multiplier), _zupt_max_disparity(zupt_max_disparity) {
-
+      _zupt_noise_multiplier(zupt_noise_multiplier), _zupt_max_disparity(zupt_max_disparity) 
+{
   // Gravity
   _gravity << 0.0, 0.0, gravity_mag;
 
   // Save our raw pixel noise squared
-  _noises.sigma_w_2 = std::pow(_noises.sigma_w, 2);
-  _noises.sigma_a_2 = std::pow(_noises.sigma_a, 2);
+  _noises.sigma_w_2  = std::pow(_noises.sigma_w, 2);
+  _noises.sigma_a_2  = std::pow(_noises.sigma_a, 2);
   _noises.sigma_wb_2 = std::pow(_noises.sigma_wb, 2);
   _noises.sigma_ab_2 = std::pow(_noises.sigma_ab, 2);
 

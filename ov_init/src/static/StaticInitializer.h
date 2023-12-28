@@ -56,7 +56,8 @@ public:
    * @param db Feature tracker database with all features in it
    * @param imu_data_ Shared pointer to our IMU vector of historical information
    */
-  explicit StaticInitializer(InertialInitializerOptions &params_, std::shared_ptr<ov_core::FeatureDatabase> db,
+  explicit StaticInitializer(InertialInitializerOptions &params_, 
+                             std::shared_ptr<ov_core::FeatureDatabase> db,
                              std::shared_ptr<std::vector<ov_core::ImuData>> imu_data_)
       : params(params_), _db(db), imu_data(imu_data_) {}
 

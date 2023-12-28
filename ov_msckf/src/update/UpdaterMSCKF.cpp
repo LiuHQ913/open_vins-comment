@@ -49,8 +49,8 @@ UpdaterMSCKF::UpdaterMSCKF(UpdaterOptions &options, ov_core::FeatureInitializerO
 
   // Initialize the chi squared test table with confidence level 0.95
   // https://github.com/KumarRobotics/msckf_vio/blob/050c50defa5a7fd9a04c1eed5687b405f02919b5/src/msckf_vio.cpp#L215-L221
-  for (int i = 1; i < 500; i++) {
-    boost::math::chi_squared chi_squared_dist(i);
+  for (int i = 1; i < 500; i++) { // todo 499次循环？
+    boost::math::chi_squared chi_squared_dist(i); // 卡方分布对象
     chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
   }
 }

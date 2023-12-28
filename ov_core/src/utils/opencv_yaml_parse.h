@@ -192,8 +192,11 @@ public:
    * @param node_result Resulting value (should already have default value in it)
    * @param required If this parameter is required by the user to set
    */
-  void parse_external(const std::string &external_node_name, const std::string &sensor_name, const std::string &node_name,
-                      Eigen::Matrix3d &node_result, bool required = true) {
+  void parse_external(const std::string &external_node_name, 
+                      const std::string &sensor_name, 
+                      const std::string &node_name,
+                      Eigen::Matrix3d &node_result, 
+                      bool required = true) {
 
 #if ROS_AVAILABLE == 1
     // If we have the ROS parameter, we should just get that one

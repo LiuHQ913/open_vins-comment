@@ -47,7 +47,8 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 
-VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false), thread_init_success(false) {
+VioManager::VioManager(VioManagerOptions &params_)
+  : thread_init_running(false), thread_init_success(false) {
 
   // Nice startup message
   PRINT_DEBUG("=======================================\n");
@@ -63,6 +64,7 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
 
   // This will globally set the thread count we will use
   // -1 will reset to the system default threading (usually the num of cores)
+  // cv::setNumThreads是一个全局函数，它会影响OpenCV库中所有可以并行运算的函数。
   cv::setNumThreads(params.num_opencv_threads);
   cv::setRNGSeed(0);
 
@@ -128,18 +130,34 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
   // Let's make a feature extractor
   // NOTE: after we initialize we will increase the total number of feature tracks
   // NOTE: we will split the total number of features over all cameras uniformly
+  // todo 不是立体匹配？？ 特征点个数 / 相机数 = 每个相机的特征点个数
   int init_max_features = std::floor((double)params.init_options.init_max_features / (double)params.state_options.num_cameras);
-  if (params.use_klt) {
-    trackFEATS = std::shared_ptr<TrackBase>(new TrackKLT(state->_cam_intrinsics_cameras, init_max_features,
-                                                         state->_options.max_aruco_features, params.use_stereo, params.histogram_method,
-                                                         params.fast_threshold, params.grid_x, params.grid_y, params.min_px_dist));
-  } else {
-    trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(
-        state->_cam_intrinsics_cameras, init_max_features, state->_options.max_aruco_features, params.use_stereo, params.histogram_method,
-        params.fast_threshold, params.grid_x, params.grid_y, params.min_px_dist, params.knn_ratio));
+  // note 两个cv::FAST提取策略不同
+  if (params.use_klt) { // cv::FAST 角点 + KLT 追踪
+    trackFEATS = std::shared_ptr<TrackBase>(new TrackKLT(state->_cam_intrinsics_cameras,
+                                                         init_max_features,
+                                                         state->_options.max_aruco_features, 
+                                                         params.use_stereo, params.histogram_method,
+                                                         params.fast_threshold, 
+                                                         params.grid_x, 
+                                                         params.grid_y, 
+                                                         params.min_px_dist));
+  }
+  else { // cv::FAST 角点 + BRIEF 描述子
+    trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(state->_cam_intrinsics_cameras, 
+                                                                init_max_features, 
+                                                                state->_options.max_aruco_features, 
+                                                                params.use_stereo, 
+                                                                params.histogram_method,
+                                                                params.fast_threshold, 
+                                                                params.grid_x, 
+                                                                params.grid_y, 
+                                                                params.min_px_dist, 
+                                                                params.knn_ratio));
   }
 
   // Initialize our aruco tag extractor
+  // todo aruco标签初始化
   if (params.use_aruco) {
     trackARUCO = std::shared_ptr<TrackBase>(new TrackAruco(state->_cam_intrinsics_cameras, state->_options.max_aruco_features,
                                                            params.use_stereo, params.histogram_method, params.downsize_aruco));
@@ -153,13 +171,18 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
 
   // Make the updater!
   updaterMSCKF = std::make_shared<UpdaterMSCKF>(params.msckf_options, params.featinit_options);
-  updaterSLAM = std::make_shared<UpdaterSLAM>(params.slam_options, params.aruco_options, params.featinit_options);
+  updaterSLAM  = std::make_shared<UpdaterSLAM>(params.slam_options, params.aruco_options, params.featinit_options);
 
   // If we are using zero velocity updates, then create the updater
   if (params.try_zupt) {
-    updaterZUPT = std::make_shared<UpdaterZeroVelocity>(params.zupt_options, params.imu_noises, trackFEATS->get_feature_database(),
-                                                        propagator, params.gravity_mag, params.zupt_max_velocity,
-                                                        params.zupt_noise_multiplier, params.zupt_max_disparity);
+    updaterZUPT = std::make_shared<UpdaterZeroVelocity>(params.zupt_options, 
+                                                        params.imu_noises, 
+                                                        trackFEATS->get_feature_database(),
+                                                        propagator,
+                                                        params.gravity_mag,
+                                                        params.zupt_max_velocity,
+                                                        params.zupt_noise_multiplier,
+                                                        params.zupt_max_disparity);
   }
 }
 

@@ -190,7 +190,8 @@ struct VioManagerOptions {
   double gravity_mag = 9.81;
 
   /// Gyroscope IMU intrinsics (scale imperfection and axis misalignment, column-wise, inverse)
-  Eigen::Matrix<double, 6, 1> vec_dw;
+  // 通常为 [1 0 0 1 0 1]
+  Eigen::Matrix<double, 6, 1> vec_dw; 
 
   /// Accelerometer IMU intrinsics (scale imperfection and axis misalignment, column-wise, inverse)
   Eigen::Matrix<double, 6, 1> vec_da;
@@ -205,6 +206,7 @@ struct VioManagerOptions {
   Eigen::Matrix<double, 4, 1> q_GYROtoIMU;
 
   /// Time offset between camera and IMU.
+  /// 可以提前标定
   double calib_camimu_dt = 0.0;
 
   /// Map between camid and camera intrinsics (fx, fy, cx, cy, d1...d4, cam_w, cam_h)
@@ -316,7 +318,7 @@ struct VioManagerOptions {
 
       // Generate the parameters we need
       // TODO: error here if this returns a NaN value (i.e. invalid matrix specified)
-      Eigen::Matrix3d Dw = Tw.colPivHouseholderQr().solve(Eigen::Matrix3d::Identity());
+      Eigen::Matrix3d Dw = Tw.colPivHouseholderQr().solve(Eigen::Matrix3d::Identity()); // Tw * Dw = I Tw = Dw = I
       Eigen::Matrix3d Da = Ta.colPivHouseholderQr().solve(Eigen::Matrix3d::Identity());
       Eigen::Matrix3d R_ACCtoIMU = R_IMUtoACC.transpose();
       Eigen::Matrix3d R_GYROtoIMU = R_IMUtoGYRO.transpose();
@@ -339,11 +341,11 @@ struct VioManagerOptions {
 
       // kalibr model: lower triangular of the matrix and R_GYROtoI
       // rpng model: upper triangular of the matrix and R_ACCtoI
-      if (state_options.imu_model == StateOptions::ImuModel::KALIBR) {
-        vec_dw << Dw.block<3, 1>(0, 0), Dw.block<2, 1>(1, 1), Dw(2, 2);
+      if (state_options.imu_model == StateOptions::ImuModel::KALIBR) { 
+        vec_dw << Dw.block<3, 1>(0, 0), Dw.block<2, 1>(1, 1), Dw(2, 2); // 下三角 [1 0 0 1 0 1]
         vec_da << Da.block<3, 1>(0, 0), Da.block<2, 1>(1, 1), Da(2, 2);
       } else {
-        vec_dw << Dw(0, 0), Dw.block<2, 1>(0, 1), Dw.block<3, 1>(0, 2);
+        vec_dw << Dw(0, 0), Dw.block<2, 1>(0, 1), Dw.block<3, 1>(0, 2); // 上三角
         vec_da << Da(0, 0), Da.block<2, 1>(0, 1), Da.block<3, 1>(0, 2);
       }
       vec_tg << Tg.block<3, 1>(0, 0), Tg.block<3, 1>(0, 1), Tg.block<3, 1>(0, 2);

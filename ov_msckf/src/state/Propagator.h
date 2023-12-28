@@ -49,8 +49,8 @@ public:
    * @param gravity_mag Global gravity magnitude of the system (normally 9.81)
    */
   Propagator(NoiseManager noises, double gravity_mag) : _noises(noises), cache_imu_valid(false) {
-    _noises.sigma_w_2 = std::pow(_noises.sigma_w, 2);
-    _noises.sigma_a_2 = std::pow(_noises.sigma_a, 2);
+    _noises.sigma_w_2  = std::pow(_noises.sigma_w,  2);
+    _noises.sigma_a_2  = std::pow(_noises.sigma_a,  2);
     _noises.sigma_wb_2 = std::pow(_noises.sigma_wb, 2);
     _noises.sigma_ab_2 = std::pow(_noises.sigma_ab, 2);
     last_prop_time_offset = 0.0;

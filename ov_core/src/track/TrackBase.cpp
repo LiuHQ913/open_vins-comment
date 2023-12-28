@@ -27,14 +27,17 @@
 
 using namespace ov_core;
 
-TrackBase::TrackBase(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
+TrackBase::TrackBase(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, 
+                     int numfeats, 
+                     int numaruco, 
+                     bool stereo,
                      HistogramMethod histmethod)
     : camera_calib(cameras), database(new FeatureDatabase()), num_features(numfeats), use_stereo(stereo), histogram_method(histmethod) {
   // Our current feature ID should be larger then the number of aruco tags we have (each has 4 corners)
   currid = 4 * (size_t)numaruco + 1;
-  // Create our mutex array based on the number of cameras we have
+  // note Create our mutex array based on the number of cameras we have
   // See https://stackoverflow.com/a/24170141/7718197
-  if (mtx_feeds.empty() || mtx_feeds.size() != camera_calib.size()) {
+  if (mtx_feeds.empty() || mtx_feeds.size() != camera_calib.size()) { // 更新互斥量个数
     std::vector<std::mutex> list(camera_calib.size());
     mtx_feeds.swap(list);
   }
