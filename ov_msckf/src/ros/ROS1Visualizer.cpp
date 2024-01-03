@@ -35,14 +35,21 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 
-ROS1Visualizer::ROS1Visualizer(std::shared_ptr<ros::NodeHandle> nh, std::shared_ptr<VioManager> app, std::shared_ptr<Simulator> sim)
-    : _nh(nh), _app(app), _sim(sim), thread_update_running(false) {
-
+ROS1Visualizer::ROS1Visualizer(std::shared_ptr<ros::NodeHandle> nh, 
+                               std::shared_ptr<VioManager> app, 
+                               std::shared_ptr<Simulator> sim)
+    : _nh(nh), _app(app), _sim(sim), thread_update_running(false) 
+{
   // Setup our transform broadcaster
-  mTfBr = std::make_shared<tf::TransformBroadcaster>();
+  mTfBr = std::make_shared<tf::TransformBroadcaster>(); // 用于发布坐标变换信息
 
-  // Create image transport
-  image_transport::ImageTransport it(*_nh);
+  /*
+    Create image transport
+    与直接使用ROS的标准消息类型sensor_msgs::Image相比，
+    image_transport::ImageTransport提供了更高效的图像传输机制，
+    它可以自动选择最适合的图像编码和传输方式，比如压缩图像或者使用共享内存。
+  */
+  image_transport::ImageTransport it(*_nh); // 用于处理图像传输
 
   // Setup pose and path publisher
   pub_poseimu = nh->advertise<geometry_msgs::PoseWithCovarianceStamped>("poseimu", 2);
@@ -52,8 +59,8 @@ ROS1Visualizer::ROS1Visualizer(std::shared_ptr<ros::NodeHandle> nh, std::shared_
   pub_pathimu = nh->advertise<nav_msgs::Path>("pathimu", 2);
   PRINT_DEBUG("Publishing: %s\n", pub_pathimu.getTopic().c_str());
 
-  // 3D points publishing
-  pub_points_msckf = nh->advertise<sensor_msgs::PointCloud2>("points_msckf", 2);
+  // 3D points publishing // todo 各个点云区别
+  pub_points_msckf = nh->advertise<sensor_msgs::PointCloud2>("points_msckf", 2); 
   PRINT_DEBUG("Publishing: %s\n", pub_points_msckf.getTopic().c_str());
   pub_points_slam = nh->advertise<sensor_msgs::PointCloud2>("points_slam", 2);
   PRINT_DEBUG("Publishing: %s\n", pub_points_msckf.getTopic().c_str());
@@ -136,19 +143,20 @@ ROS1Visualizer::ROS1Visualizer(std::shared_ptr<ros::NodeHandle> nh, std::shared_
   }
 
   // Start thread for the image publishing
-  if (_app->get_params().use_multi_threading_pubs) {
-    std::thread thread([&] {
-      ros::Rate loop_rate(20);
-      while (ros::ok()) {
-        publish_images();
-        loop_rate.sleep();
-      }
-    });
+  if (_app->get_params().use_multi_threading_pubs) 
+  {
+    std::thread thread([&]{ros::Rate loop_rate(20);
+                           while (ros::ok()) {
+                            publish_images();
+                            loop_rate.sleep();}
+                          }
+                      );
     thread.detach();
   }
 }
 
-void ROS1Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> parser) {
+void ROS1Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> parser) 
+{
 
   // We need a valid parser
   assert(parser != nullptr);
@@ -157,7 +165,7 @@ void ROS1Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
   std::string topic_imu;
   _nh->param<std::string>("topic_imu", topic_imu, "/imu0");
   parser->parse_external("relative_config_imu", "imu0", "rostopic", topic_imu);
-  sub_imu = _nh->subscribe(topic_imu, 1000, &ROS1Visualizer::callback_inertial, this);
+  sub_imu = _nh->subscribe(topic_imu, 1000, &ROS1Visualizer::callback_inertial, this); // imu 回调函数
   PRINT_INFO("subscribing to IMU: %s\n", topic_imu.c_str());
 
   // Logic for sync stereo subscriber
@@ -440,8 +448,12 @@ void ROS1Visualizer::callback_inertial(const sensor_msgs::Imu::ConstPtr &msg) {
   // convert into correct format
   ov_core::ImuData message;
   message.timestamp = msg->header.stamp.toSec();
-  message.wm << msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z;
-  message.am << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
+  message.wm << msg->angular_velocity.x, 
+                msg->angular_velocity.y, 
+                msg->angular_velocity.z;
+  message.am << msg->linear_acceleration.x, 
+                msg->linear_acceleration.y, 
+                msg->linear_acceleration.z;
 
   // send it to our VIO system
   _app->feed_measurement_imu(message);

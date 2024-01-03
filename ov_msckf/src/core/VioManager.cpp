@@ -211,11 +211,13 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
   }
 }
 
-void VioManager::feed_measurement_simulation(double timestamp, const std::vector<int> &camids,
-                                             const std::vector<std::vector<std::pair<size_t, Eigen::VectorXf>>> &feats) {
+void VioManager::feed_measurement_simulation(double timestamp, 
+                                             const std::vector<int> &camids,
+                                             const std::vector<std::vector<std::pair<size_t, Eigen::VectorXf>>> &feats) 
+{
 
   // Start timing
-  rT1 = boost::posix_time::microsec_clock::local_time();
+  rT1 = boost::posix_time::microsec_clock::local_time(); // code 获取当前的本地时间
 
   // Check if we actually have a simulated tracker
   // If not, recreate and re-cast the tracker to our simulation tracker

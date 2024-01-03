@@ -64,6 +64,8 @@ class VioManager {
 public:
   /**
    * @brief Default constructor, will load all configuration variables
+   *        1.设置imu内参； 2.时间延迟； 3.相机内参； 4.imu、cam外参
+   *        5.设置匹配参数； 6.imu预积分传播； 7.设置msckf参数； 8.设置zupt参数
    * @param params_ Parameters loaded from either ROS or CMDLINE
    */
   VioManager(VioManagerOptions &params_);

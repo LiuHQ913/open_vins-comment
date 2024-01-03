@@ -92,6 +92,14 @@ private:
 
 /*
  * The different Types of print levels
+ #define PRINT_ALL(x...) ov_core::Printer::debugPrint(ov_core::Printer::PrintLevel::ALL, 
+                                                      __FILE__, 
+                                                      TOSTRING(__LINE__), 
+                                                      x);
+  ov_core::Printer::PrintLevel::ALL是一个枚举值，表示打印的信息级别是调试级别；
+  __FILE__是一个预定义的宏，它会被替换为当前源文件的文件名；
+  TOSTRING(__LINE__)是一个宏，它会将__LINE__（一个预定义的宏，表示当前的行号）转换为字符串；
+  x是PRINT_DEBUG宏接受的参数，它会被传递给ov_core::Printer::debugPrint函数；
  */
 #define PRINT_ALL(x...) ov_core::Printer::debugPrint(ov_core::Printer::PrintLevel::ALL, __FILE__, TOSTRING(__LINE__), x);
 #define PRINT_DEBUG(x...) ov_core::Printer::debugPrint(ov_core::Printer::PrintLevel::DEBUG, __FILE__, TOSTRING(__LINE__), x);

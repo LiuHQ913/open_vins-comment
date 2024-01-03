@@ -66,7 +66,7 @@ public:
   double margtimestep() {
     std::lock_guard<std::mutex> lock(_mutex_state);
     double time = INFINITY;
-    for (const auto &clone_imu : _clones_IMU) {
+    for (const auto &clone_imu : _clones_IMU) { // todo 为什么不在选择一个直接可取的数据结构
       if (clone_imu.first < time) {
         time = clone_imu.first;
       }

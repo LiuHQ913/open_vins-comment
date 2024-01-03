@@ -56,6 +56,10 @@ int main(int argc, char **argv) {
   // Launch our ros node
   ros::init(argc, argv, "run_subscribe_msckf");
   auto nh = std::make_shared<ros::NodeHandle>("~");
+  // @brief 从ROS的参数服务器中获取一个参数的值
+  // @param 第一个参数是我们想要获取的参数的名字
+  //        第二个参数是一个变量，用于存储获取到的参数值
+  //        第三个参数是默认值
   nh->param<std::string>("config_path", config_path, config_path);
 #elif ROS_AVAILABLE == 2
   // Launch our ros node
@@ -84,9 +88,9 @@ int main(int argc, char **argv) {
   VioManagerOptions params;
   params.print_and_load(parser);
   params.use_multi_threading_subs = true;
-  sys = std::make_shared<VioManager>(params); // todo flag
+  sys = std::make_shared<VioManager>(params); //（构造）初始化
 #if ROS_AVAILABLE == 1
-  viz = std::make_shared<ROS1Visualizer>(nh, sys);
+  viz = std::make_shared<ROS1Visualizer>(nh, sys); //（构造）初始化，定义发布节点，创建多线程
   viz->setup_subscribers(parser);
 #elif ROS_AVAILABLE == 2
   viz = std::make_shared<ROS2Visualizer>(node, sys);
@@ -103,9 +107,9 @@ int main(int argc, char **argv) {
   PRINT_DEBUG("done...spinning to ros\n");
 #if ROS_AVAILABLE == 1
   // ros::spin();
-  ros::AsyncSpinner spinner(0);
-  spinner.start();
-  ros::waitForShutdown();
+  ros::AsyncSpinner spinner(0); // code 参数0表示该spinner将使用所有可用的CPU核心来处理回调
+  spinner.start();              // 开始处理ROS的消息回调（非阻塞的）
+  ros::waitForShutdown();       // 让当前的节点保持运行，直到ROS被关闭(阻塞的)
 #elif ROS_AVAILABLE == 2
   // rclcpp::spin(node);
   rclcpp::executors::MultiThreadedExecutor executor;
