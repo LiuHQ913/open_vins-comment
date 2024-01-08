@@ -456,14 +456,14 @@ void ROS1Visualizer::callback_inertial(const sensor_msgs::Imu::ConstPtr &msg) {
                 msg->linear_acceleration.z;
 
   // send it to our VIO system
-  _app->feed_measurement_imu(message);
-  visualize_odometry(message.timestamp);
+  _app->feed_measurement_imu(message);   // 仅喂数据
+  visualize_odometry(message.timestamp); // 里程计推演（前提：完成初始化）
 
   // If the processing queue is currently active / running just return so we can keep getting measurements
   // Otherwise create a second thread to do our update in an async manor
   // The visualization of the state, images, and features will be synchronous with the update!
   if (thread_update_running)
-    return;
+    return; // todo 直接返回，在以后的回调函数中，会再次调用该函数，直到thread_update_running为false？
   thread_update_running = true;
   std::thread thread([&] {
     // Lock on the queue (prevents new images from appending)
@@ -471,16 +471,17 @@ void ROS1Visualizer::callback_inertial(const sensor_msgs::Imu::ConstPtr &msg) {
 
     // Count how many unique image streams
     std::map<int, bool> unique_cam_ids;
-    for (const auto &cam_msg : camera_queue) {
-      unique_cam_ids[cam_msg.sensor_ids.at(0)] = true;
+    for (const auto &cam_msg : camera_queue) { // 遍历CameraData容器
+      unique_cam_ids[cam_msg.sensor_ids.at(0)] = true; // code 记录哪些相机ID已经被处理过，以确保每个ID只被处理一次。
     }
 
     // If we do not have enough unique cameras then we need to wait
     // We should wait till we have one of each camera to ensure we propagate in the correct order
     auto params = _app->get_params();
+    // 值为2时，实际上只有一台独特的相机
     size_t num_unique_cameras = (params.state_options.num_cameras == 2) ? 1 : params.state_options.num_cameras;
-    if (unique_cam_ids.size() == num_unique_cameras) {
-
+    if (unique_cam_ids.size() == num_unique_cameras)
+    {
       // Loop through our queue and see if we are able to process any of our camera measurements
       // We are able to process if we have at least one IMU measurement greater than the camera time
       double timestamp_imu_inC = message.timestamp - _app->get_state()->_calib_dt_CAMtoIMU->value()(0);
@@ -494,6 +495,9 @@ void ROS1Visualizer::callback_inertial(const sensor_msgs::Imu::ConstPtr &msg) {
         double time_total = (rT0_2 - rT0_1).total_microseconds() * 1e-6;
         PRINT_INFO(BLUE "[TIME]: %.4f seconds total (%.1f hz, %.2f ms behind)\n" RESET, time_total, 1.0 / time_total, update_dt);
       }
+    }
+    else {
+      // todo 如果不相等说明什么问题？ 又该如何处理？
     }
     thread_update_running = false;
   });

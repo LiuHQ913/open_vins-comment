@@ -43,11 +43,13 @@ void TrackAruco::feed_new_camera(const CameraData &message) {
   // Thus here we should just call the monocular version two times
 #if ENABLE_ARUCO_TAGS
   size_t num_images = message.images.size();
-  parallel_for_(cv::Range(0, (int)num_images), LambdaBody([&](const cv::Range &range) {
-                  for (int i = range.start; i < range.end; i++) {
-                    perform_tracking(message.timestamp, message.images.at(i), message.sensor_ids.at(i), message.masks.at(i));
-                  }
-                }));
+  parallel_for_(cv::Range(0, (int)num_images),
+                LambdaBody([&](const cv::Range &range){
+                    for (int i = range.start; i < range.end; i++) {
+                      perform_tracking(message.timestamp, message.images.at(i), message.sensor_ids.at(i), message.masks.at(i)); // kernel
+                    }
+                  })
+                );
 #else
   PRINT_ERROR(RED "[ERROR]: you have not compiled with aruco tag support!!!\n" RESET);
   std::exit(EXIT_FAILURE);
@@ -56,8 +58,11 @@ void TrackAruco::feed_new_camera(const CameraData &message) {
 
 #if ENABLE_ARUCO_TAGS
 
-void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t cam_id, const cv::Mat &maskin) {
-
+void TrackAruco::perform_tracking(double timestamp, 
+                                  const cv::Mat &imgin, 
+                                  size_t cam_id, 
+                                  const cv::Mat &maskin) 
+{
   // Start timing
   rT1 = boost::posix_time::microsec_clock::local_time();
 
@@ -68,12 +73,14 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   cv::Mat img;
   if (histogram_method == HistogramMethod::HISTOGRAM) {
     cv::equalizeHist(imgin, img);
-  } else if (histogram_method == HistogramMethod::CLAHE) {
+  } 
+  else if (histogram_method == HistogramMethod::CLAHE) {
     double eq_clip_limit = 10.0;
     cv::Size eq_win_size = cv::Size(8, 8);
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(eq_clip_limit, eq_win_size);
     clahe->apply(imgin, img);
-  } else {
+  } 
+  else {
     img = imgin;
   }
 
@@ -86,7 +93,8 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   cv::Mat img0;
   if (do_downsizing) {
     cv::pyrDown(img, img0, cv::Size(img.cols / 2, img.rows / 2));
-  } else {
+  } 
+  else {
     img0 = img;
   }
 
@@ -95,6 +103,16 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
 
   // Perform extraction
 #if CV_MAJOR_VERSION > 4 || ( CV_MAJOR_VERSION == 4 && CV_MINOR_VERSION >= 7)
+// 注意，只有当OpenCV的主版本号大于4或者主版本号等于4且次版本号大于等于7时，才会被定义
+/*
+  gpt ArUco字典：这是一个cv::aruco::Dictionary对象，表示用于识别ArUco标记的字典。字典中的每个标记都有一个唯一的ID，可以用于标记识别 
+  gpt 用于在图像中检测ArUco标记
+  gpt 这个方法需要四个参数：
+  gpt    1. 输入图像
+  gpt    2. 用于存储检测到的标记角点的二维向量。每个标记的角点是一个std::vector<cv::Point2f>，包含四个点，表示标记的四个角。
+  gpt    3. 用于存储检测到的每个ArUco标记的ID。每个标记的ID是一个整数，可以从字典中查找到对应的标记。
+  gpt    4. 用于存储未被识别为有效ArUco标记的候选标记的向量。每个候选标记的角点是一个std::vector<cv::Point2f>，包含四个点，表示标记的四个角。
+*/
   aruco_detector.detectMarkers(img0, corners[cam_id], ids_aruco[cam_id], rejects[cam_id]);
 #else
   cv::aruco::detectMarkers(img0, aruco_dict, corners[cam_id], ids_aruco[cam_id], aruco_params, rejects[cam_id]);
@@ -130,13 +148,13 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   std::vector<cv::KeyPoint> pts_new;
 
   // Append to our feature database this new information
-  for (size_t i = 0; i < ids_aruco[cam_id].size(); i++) {
+  for (size_t i = 0; i < ids_aruco[cam_id].size(); i++) { // 遍历检测到的标记ID的向量
     // Skip if ID is greater then our max
-    if (ids_aruco[cam_id].at(i) > max_tag_id)
+    if (ids_aruco[cam_id].at(i) > max_tag_id) // 跳过大于最大标记ID的标记 // todo 这么做的原因是什么？
       continue;
     // Assert we have 4 points (we will only use one of them)
     assert(corners[cam_id].at(i).size() == 4);
-    for (int n = 0; n < 4; n++) {
+    for (int n = 0; n < 4; n++) { // 遍历标记的四个角点
       // Check if it is in the mask
       // NOTE: mask has max value of 255 (white) if it should be
       if (maskin.at<uint8_t>((int)corners[cam_id].at(i).at(n).y, (int)corners[cam_id].at(i).at(n).x) > 127)

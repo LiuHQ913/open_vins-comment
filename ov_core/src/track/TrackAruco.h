@@ -37,8 +37,8 @@ namespace ov_core {
  * We track the corners of the tag as compared to the pose of the tag or any other corners.
  * Right now we hardcode the dictionary to be `cv::aruco::DICT_6X6_1000`, so please generate tags in this family of tags.
  * You can generate these tags using an online utility: https://chev.me/arucogen/
- * The actual size of the tags do not matter since we do not recover the pose and instead just use this for re-detection and tracking of the
- * four corners of the tag.
+ * The actual size of the tags do not matter since we do not recover the pose and instead just use this for re-detection and 
+ * tracking of the four corners of the tag.
  */
 class TrackAruco : public TrackBase {
 
@@ -51,15 +51,26 @@ public:
    * @param histmethod what type of histogram pre-processing should be done (histogram eq?)
    * @param downsize we can scale the image by 1/2 to increase Aruco tag extraction speed
    */
-  explicit TrackAruco(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numaruco, bool stereo, HistogramMethod histmethod,
+  explicit TrackAruco(std::unordered_map<size_t, 
+                      std::shared_ptr<CamBase>> cameras, 
+                      int numaruco, 
+                      bool stereo, 
+                      HistogramMethod histmethod,
                       bool downsize)
-      : TrackBase(cameras, 0, numaruco, stereo, histmethod), max_tag_id(numaruco), do_downsizing(downsize) {
+      : TrackBase(cameras, 0, numaruco, stereo, histmethod), max_tag_id(numaruco), do_downsizing(downsize) 
+{
 #if ENABLE_ARUCO_TAGS
 #if CV_MAJOR_VERSION > 4 || ( CV_MAJOR_VERSION == 4 && CV_MINOR_VERSION >= 7)
     aruco_dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_1000);
     aruco_params.cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
     aruco_detector = cv::aruco::ArucoDetector(aruco_dict, aruco_params);
 #else
+    /*
+      获取一个预定义的ArUco字典。ArUco字典是一个包含了特定数量和类型的ArUco标记的集合。
+      每个ArUco标记都是一个二维的二进制方阵，可以被用于相机定位和3D重建等任务。
+      这个字典可以被用于后续的ArUco标记检测和识别任务。
+      例如，你可以使用这个字典来检测图像中的ArUco标记，或者从一个ArUco标记中解码出对应的ID。
+    */
     aruco_dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_1000);
     aruco_params = cv::aruco::DetectorParameters::create();
     // NOTE: people with newer opencv might fail here
@@ -101,18 +112,21 @@ protected:
 #endif
 
   // Max tag ID we should extract from (i.e., number of aruco tags starting from zero)
+  // The max id of the arucotags, we don't use any tags greater than this value even if we extract them
   int max_tag_id;
 
   // If we should downsize the image
   bool do_downsizing;
 
 #if ENABLE_ARUCO_TAGS
+// 注意，只有当OpenCV的主版本号大于4或者主版本号等于4且次版本号大于等于7时，才会被定义
 #if CV_MAJOR_VERSION > 4 || ( CV_MAJOR_VERSION == 4 && CV_MINOR_VERSION >= 7)
   // Our dictionary that we will extract aruco tags with
   cv::aruco::Dictionary aruco_dict;
   // Parameters the opencv extractor uses
   cv::aruco::DetectorParameters aruco_params;
   // Actual detector class
+  // cv::aruco::ArucoDetector是OpenCV库中的一个类，用于检测图像中的ArUco标记。
   cv::aruco::ArucoDetector aruco_detector;
 #else
   // Our dictionary that we will extract aruco tags with

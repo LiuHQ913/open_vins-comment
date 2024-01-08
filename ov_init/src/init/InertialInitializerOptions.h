@@ -60,7 +60,8 @@ struct InertialInitializerOptions {
 
   // INITIALIZATION ============================
 
-  /// Amount of time we will initialize over (seconds)
+  /// Amount of time we will initialize over (seconds) 
+  /// how many seconds to collect initialization information
   double init_window_time = 1.0;
 
   /// Variance threshold on our acceleration to be classified as moving

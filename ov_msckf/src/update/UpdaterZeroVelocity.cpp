@@ -61,8 +61,8 @@ UpdaterZeroVelocity::UpdaterZeroVelocity(UpdaterOptions &options,
 
   // Initialize the chi squared test table with confidence level 0.95
   // https://github.com/KumarRobotics/msckf_vio/blob/050c50defa5a7fd9a04c1eed5687b405f02919b5/src/msckf_vio.cpp#L215-L221
-  for (int i = 1; i < 1000; i++) {
-    boost::math::chi_squared chi_squared_dist(i);
+  for (int i = 1; i < 1000; i++) { // 创建一个卡方分布表
+    boost::math::chi_squared chi_squared_dist(i); // 卡方分布自由度为i
     chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
   }
 }
@@ -71,19 +71,19 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
 
   // Return if we don't have any imu data yet
   if (imu_data.empty()) {
-    last_zupt_state_timestamp = 0.0;
+    last_zupt_state_timestamp = 0.0; // 最后的一个zupt的时间戳，复位
     return false;
   }
 
   // Return if the state is already at the desired time
   if (state->_timestamp == timestamp) {
-    last_zupt_state_timestamp = 0.0;
+    last_zupt_state_timestamp = 0.0; // 最后的一个zupt的时间戳，复位
     return false;
   }
 
   // Set the last time offset value if we have just started the system up
   if (!have_last_prop_time_offset) {
-    last_prop_time_offset = state->_calib_dt_CAMtoIMU->value()(0);
+    last_prop_time_offset = state->_calib_dt_CAMtoIMU->value()(0); // 获取相机到imu的时间偏移量
     have_last_prop_time_offset = true;
   }
 
@@ -91,18 +91,19 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // assert(timestamp > state->_timestamp);
 
   // Get what our IMU-camera offset should be (t_imu = t_cam + calib_dt)
-  double t_off_new = state->_calib_dt_CAMtoIMU->value()(0);
+  double t_off_new = state->_calib_dt_CAMtoIMU->value()(0); // 获取相机到imu的时间偏移量
 
   // First lets construct an IMU vector of measurements we need
+  // todo last_prop_time_offset与t_off_new的区别？ // lhq 一个是上一次的时间偏移量，一个是当前的时间偏移量
   // double time0 = state->_timestamp+t_off_new;
   double time0 = state->_timestamp + last_prop_time_offset;
   double time1 = timestamp + t_off_new;
 
   // Select bounding inertial measurements
-  std::vector<ov_core::ImuData> imu_recent = Propagator::select_imu_readings(imu_data, time0, time1);
+  std::vector<ov_core::ImuData> imu_recent = Propagator::select_imu_readings(imu_data, time0, time1); // 获取time0~time1之间的imu数据
 
   // Move forward in time
-  last_prop_time_offset = t_off_new;
+  last_prop_time_offset = t_off_new; // 维护时间偏移量
 
   // Check that we have at least one measurement to propagate with
   if (imu_recent.size() < 2) {
@@ -113,6 +114,13 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
 
   // If we should integrate the acceleration and say the velocity should be zero
   // Also if we should still inflate the bias based on their random walk noises
+  /*
+    功能选项：
+      1. 系统是否积分加速度并假设速度应为零。这是一个未经测试的特性，所以默认值为假。
+      2. 系统是否考虑随时间变化的随机游走偏差。在实际的IMU数据处理中，通常需要考虑随时间变化的偏差，所以默认值为真。
+      3. 系统是否通过检查图像的视差来覆盖其他检查。因为如果视差较大，那么很可能设备正在移动，不应进行零速度更新。默认值为真。
+      4. 系统是否明确地强制运动为零。这是一个更强硬的措施，只有在确定设备完全静止的情况下才会使用。默认值为假。
+  */
   bool integrated_accel_constraint = false; // untested
   bool model_time_varying_bias = true;
   bool override_with_disparity_check = true;
@@ -123,34 +131,35 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   Hx_order.push_back(state->_imu->q());
   Hx_order.push_back(state->_imu->bg());
   Hx_order.push_back(state->_imu->ba());
-  if (integrated_accel_constraint) {
+  if (integrated_accel_constraint) { // todo 这是在做什么？
     Hx_order.push_back(state->_imu->v());
   }
 
   // Large final matrices used for update (we will compress these)
-  int h_size = (integrated_accel_constraint) ? 12 : 9;
-  int m_size = 6 * ((int)imu_recent.size() - 1);
-  Eigen::MatrixXd H = Eigen::MatrixXd::Zero(m_size, h_size);
-  Eigen::VectorXd res = Eigen::VectorXd::Zero(m_size);
+  int h_size = (integrated_accel_constraint) ? 12 : 9; // note 这里是9维度，q提供3个自由度 // todo 各个开源算法中都是这样吗？
+  int m_size = 6 * ((int)imu_recent.size() - 1);       // 一个imu提供6个变量
+  Eigen::MatrixXd H   = Eigen::MatrixXd::Zero(m_size, h_size); // δf(x) = J = δ[imu]/δ[q bg ba] 的维度
+  Eigen::VectorXd res = Eigen::VectorXd::Zero(m_size);         //  f(x) = b = [imu] 的维度
 
   // IMU intrinsic calibration estimates (static)
   Eigen::Matrix3d Dw = State::Dm(state->_options.imu_model, state->_calib_imu_dw->value());
   Eigen::Matrix3d Da = State::Dm(state->_options.imu_model, state->_calib_imu_da->value());
   Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value());
 
+  // 参考 https://docs.openvins.com/update-zerovelocity.html#update-zerovelocity-meas
   // Loop through all our IMU and construct the residual and Jacobian
   // TODO: should add jacobians here in respect to IMU intrinsics!!
-  // State order is: [q_GtoI, bg, ba, v_IinG]
+  // State order is: [q_GtoI, bg, ba, v_IinG] // note 这里坐标系变换
   // Measurement order is: [w_true = 0, a_true = 0 or v_k+1 = 0]
   // w_true = w_m - bw - nw
-  // a_true = a_m - ba - R*g - na
+  // a_true = a_m - ba - R*g - na  // todo R、g的坐标系 // lhq g在G系下
   // v_true = v_k - g*dt + R^T*(a_m - ba - na)*dt
   double dt_summed = 0;
   for (size_t i = 0; i < imu_recent.size() - 1; i++) {
 
     // Precomputed values
     double dt = imu_recent.at(i + 1).timestamp - imu_recent.at(i).timestamp;
-    Eigen::Vector3d a_hat = state->_calib_imu_ACCtoIMU->Rot() * Da * (imu_recent.at(i).am - state->_imu->bias_a());
+    Eigen::Vector3d a_hat = state->_calib_imu_ACCtoIMU->Rot()  * Da * (imu_recent.at(i).am - state->_imu->bias_a());
     Eigen::Vector3d w_hat = state->_calib_imu_GYROtoIMU->Rot() * Dw * (imu_recent.at(i).wm - state->_imu->bias_g() - Tg * a_hat);
 
     // Measurement noise (convert from continuous to discrete)
@@ -166,7 +175,8 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     res.block(6 * i + 0, 0, 3, 1) = -w_omega * w_hat;
     if (!integrated_accel_constraint) {
       res.block(6 * i + 3, 0, 3, 1) = -w_accel * (a_hat - state->_imu->Rot() * _gravity);
-    } else {
+    } 
+    else {
       res.block(6 * i + 3, 0, 3, 1) = -w_accel_v * (state->_imu->vel() - _gravity * dt + state->_imu->Rot().transpose() * a_hat * dt);
     }
 
@@ -176,7 +186,8 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     if (!integrated_accel_constraint) {
       H.block(6 * i + 3, 0, 3, 3) = -w_accel * skew_x(R_GtoI_jacob * _gravity);
       H.block(6 * i + 3, 6, 3, 3) = -w_accel * Eigen::Matrix3d::Identity();
-    } else {
+    } 
+    else {
       H.block(6 * i + 3, 0, 3, 3) = -w_accel_v * R_GtoI_jacob.transpose() * skew_x(a_hat) * dt;
       H.block(6 * i + 3, 6, 3, 3) = -w_accel_v * R_GtoI_jacob.transpose() * dt;
       H.block(6 * i + 3, 9, 3, 3) = w_accel_v * Eigen::Matrix3d::Identity();
@@ -214,7 +225,8 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   double chi2_check;
   if (res.rows() < 1000) {
     chi2_check = chi_squared_table[res.rows()];
-  } else {
+  } 
+  else {
     boost::math::chi_squared chi_squared_dist(res.rows());
     chi2_check = boost::math::quantile(chi_squared_dist, 0.95);
     PRINT_WARNING(YELLOW "[ZUPT]: chi2_check over the residual limit - %d\n" RESET, (int)res.rows());
@@ -236,7 +248,8 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     disparity_passed = (disp_avg < _zupt_max_disparity && num_features > 20);
     if (disparity_passed) {
       PRINT_INFO(CYAN "[ZUPT]: passed disparity (%.3f < %.3f, %d features)\n" RESET, disp_avg, _zupt_max_disparity, (int)num_features);
-    } else {
+    } 
+    else {
       PRINT_DEBUG(YELLOW "[ZUPT]: failed disparity (%.3f > %.3f, %d features)\n" RESET, disp_avg, _zupt_max_disparity, (int)num_features);
     }
   }

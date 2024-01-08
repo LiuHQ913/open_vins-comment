@@ -266,8 +266,11 @@ bool Propagator::fast_state_propagate(std::shared_ptr<State> state, double times
   return true;
 }
 
-std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<ov_core::ImuData> &imu_data, double time0, double time1,
-                                                              bool warn) {
+std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<ov_core::ImuData> &imu_data, 
+                                                              double time0, 
+                                                              double time1,
+                                                              bool warn) 
+{
 
   // Our vector imu readings
   std::vector<ov_core::ImuData> prop_data;
@@ -281,19 +284,21 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
 
   // Loop through and find all the needed measurements to propagate with
   // Note we split measurements based on the given state time, and the update timestamp
-  for (size_t i = 0; i < imu_data.size() - 1; i++) {
+  // note 找到需要的数据，感觉还是挺容易理解的，对比vins该如何评价？
+  for (size_t i = 0; i < imu_data.size() - 1; i++) { 
 
     // START OF THE INTEGRATION PERIOD
     // If the next timestamp is greater then our current state time
     // And the current is not greater then it yet...
     // Then we should "split" our current IMU measurement
-    if (imu_data.at(i + 1).timestamp > time0 && imu_data.at(i).timestamp < time0) {
+    if (imu_data.at(i + 1).timestamp > time0 && imu_data.at(i).timestamp < time0) // 起始时间卡位于两个imu数据之间
+    {
       ov_core::ImuData data = Propagator::interpolate_data(imu_data.at(i), imu_data.at(i + 1), time0);
       prop_data.push_back(data);
       // PRINT_DEBUG("propagation #%d = CASE 1 = %.3f => %.3f\n", (int)i, data.timestamp - prop_data.at(0).timestamp,
       //             time0 - prop_data.at(0).timestamp);
       continue;
-    }
+    } // 确定起始imu数据（插值）
 
     // MIDDLE OF INTEGRATION PERIOD
     // If our imu measurement is right in the middle of our propagation period
@@ -302,7 +307,7 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
       prop_data.push_back(imu_data.at(i));
       // PRINT_DEBUG("propagation #%d = CASE 2 = %.3f\n", (int)i, imu_data.at(i).timestamp - prop_data.at(0).timestamp);
       continue;
-    }
+    } // imu数据在起始时间和结束时间之间
 
     // END OF THE INTEGRATION PERIOD
     // If the current timestamp is greater then our update time
@@ -311,24 +316,27 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
     // NOTE: we also break out of this loop, as this is the last IMU measurement we need!
     if (imu_data.at(i + 1).timestamp > time1) {
       // If we have a very low frequency IMU then, we could have only recorded the first integration (i.e. case 1) and nothing else
-      // In this case, both the current IMU measurement and the next is greater than the desired intepolation, thus we should just cut the
-      // current at the desired time Else, we have hit CASE2 and this IMU measurement is not past the desired propagation time, thus add the
-      // whole IMU reading
+      // In this case, both the current IMU measurement and the next is greater than the desired intepolation, thus we should just 
+      // cut the current at the desired time Else, we have hit CASE2 and this IMU measurement is not past the desired propagation time, 
+      // thus add the whole IMU reading
       if (imu_data.at(i).timestamp > time1 && i == 0) {
         // This case can happen if we don't have any imu data that has occured before the startup time
         // This means that either we have dropped IMU data, or we have not gotten enough.
         // In this case we can't propgate forward in time, so there is not that much we can do.
         break;
-      } else if (imu_data.at(i).timestamp > time1) {
+      }
+      else if (imu_data.at(i).timestamp > time1) { // todo 会进入到这里吗？ // lhq 会进入，用超部分的imu进行插值
         ov_core::ImuData data = interpolate_data(imu_data.at(i - 1), imu_data.at(i), time1);
         prop_data.push_back(data);
         // PRINT_DEBUG("propagation #%d = CASE 3.1 = %.3f => %.3f\n", (int)i, imu_data.at(i).timestamp - prop_data.at(0).timestamp,
         //             imu_data.at(i).timestamp - time0);
-      } else {
-        prop_data.push_back(imu_data.at(i));
+      }
+      else {
+        prop_data.push_back(imu_data.at(i)); // todo 不插值吗？ // lhq 这个不做插值，因为这个不是最后一个imu数据
         // PRINT_DEBUG("propagation #%d = CASE 3.2 = %.3f => %.3f\n", (int)i, imu_data.at(i).timestamp - prop_data.at(0).timestamp,
         //             imu_data.at(i).timestamp - time0);
       }
+
       // If the added IMU message doesn't end exactly at the camera time
       // Then we need to add another one that is right at the ending time
       if (prop_data.at(prop_data.size() - 1).timestamp != time1) {
@@ -355,11 +363,12 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
   // (i.e., the last inertial measurement we have is smaller then the time we want to reach)
   // Then we should just "stretch" the last measurement to be the whole period
   // TODO: this really isn't that good of logic, we should fix this so the above logic is exact!
+  // todo 是否真的会进入到这里？
   if (prop_data.at(prop_data.size() - 1).timestamp != time1) {
     if (warn)
       PRINT_DEBUG(YELLOW "Propagator::select_imu_readings(): Missing inertial measurements to propagate with (%f sec missing)!\n" RESET,
                   (time1 - imu_data.at(imu_data.size() - 1).timestamp));
-    ov_core::ImuData data = interpolate_data(imu_data.at(imu_data.size() - 2), imu_data.at(imu_data.size() - 1), time1);
+    ov_core::ImuData data = interpolate_data(imu_data.at(imu_data.size() - 2), imu_data.at(imu_data.size() - 1), time1); // todo 这是什么插值？
     prop_data.push_back(data);
     // PRINT_DEBUG("propagation #%d = CASE 3.4 = %.3f => %.3f\n", (int)(imu_data.size() - 2), data.timestamp - prop_data.at(0).timestamp,
     // data.timestamp - time0);
@@ -367,7 +376,7 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
 
   // Loop through and ensure we do not have any zero dt values
   // This would cause the noise covariance to be Infinity
-  // TODO: we should actually fix this by properly implementing this function and doing unit tests on it...
+  // TODO: we should actually fix this by properly implementing this function and doing unit tests on it... // todo 这个注释是什么意思？
   for (size_t i = 0; i < prop_data.size() - 1; i++) {
     if (std::abs(prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp) < 1e-12) {
       if (warn)

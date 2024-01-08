@@ -73,7 +73,7 @@ protected:
   /**
    * @brief Process a new monocular image
    * @param message Contains our timestamp, images, and camera ids
-   * @param msg_id the camera index in message data vector
+   * @param msg_id the camera index in message data vector, usually 0
    */
   void feed_monocular(const CameraData &message, size_t msg_id);
 
@@ -98,7 +98,10 @@ protected:
    * Our vector of IDs will be later overwritten when we match features temporally to the previous frame's features.
    * See robust_match() for the matching.
    */
-  void perform_detection_monocular(const cv::Mat &img0, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0, cv::Mat &desc0,
+  void perform_detection_monocular(const cv::Mat &img0, 
+                                   const cv::Mat &mask0, 
+                                   std::vector<cv::KeyPoint> &pts0, 
+                                   cv::Mat &desc0,
                                    std::vector<size_t> &ids0);
 
   /**
@@ -166,6 +169,7 @@ protected:
   int grid_y;
 
   // Minimum pixel distance to be "far away enough" to be a different extracted feature
+  // Distance between features (features near each other provide less information)
   int min_px_dist;
 
   // The ratio between two kNN matches, if that ratio is larger then this threshold

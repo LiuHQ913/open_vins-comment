@@ -147,7 +147,7 @@ VioManager::VioManager(VioManagerOptions &params_)
     trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(state->_cam_intrinsics_cameras, 
                                                                 init_max_features, 
                                                                 state->_options.max_aruco_features, 
-                                                                params.use_stereo, 
+                                                                params.use_stereo,
                                                                 params.histogram_method,
                                                                 params.fast_threshold, 
                                                                 params.grid_x, 
@@ -159,8 +159,11 @@ VioManager::VioManager(VioManagerOptions &params_)
   // Initialize our aruco tag extractor
   // todo aruco标签初始化
   if (params.use_aruco) {
-    trackARUCO = std::shared_ptr<TrackBase>(new TrackAruco(state->_cam_intrinsics_cameras, state->_options.max_aruco_features,
-                                                           params.use_stereo, params.histogram_method, params.downsize_aruco));
+    trackARUCO = std::shared_ptr<TrackBase>(new TrackAruco(state->_cam_intrinsics_cameras, 
+                                                           state->_options.max_aruco_features, // the max id of the arucotags, we don't use any tags greater than this value even if we extract them
+                                                           params.use_stereo, 
+                                                           params.histogram_method, 
+                                                           params.downsize_aruco));
   }
 
   // Initialize our state propagator
@@ -190,23 +193,29 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
 
   // The oldest time we need IMU with is the last clone
   // We shouldn't really need the whole window, but if we go backwards in time we will
-  double oldest_time = state->margtimestep();
+  double oldest_time = state->margtimestep(); // 获取滑窗中最老时间戳
   if (oldest_time > state->_timestamp) {
     oldest_time = -1;
   }
-  if (!is_initialized_vio) {
+  if (!is_initialized_vio) { // 未初始化
+    // note 当前imu时间戳 - 用于初始化的时间（2s）+ 相机到IMU的时间偏移 - 0.10（留出一些余量）
+    // 例： 99s - 2s + 0.05 - 0.1 = 97.95s
     oldest_time = message.timestamp - params.init_options.init_window_time + state->_calib_dt_CAMtoIMU->value()(0) - 0.10;
   }
   propagator->feed_imu(message, oldest_time);
 
   // Push back to our initializer
-  if (!is_initialized_vio) {
+  if (!is_initialized_vio) { // 未初始化
     initializer->feed_imu(message, oldest_time);
   }
 
   // Push back to the zero velocity updater if it is enabled
   // No need to push back if we are just doing the zv-update at the begining and we have moved
-  if (is_initialized_vio && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
+  // 1. 完成初始化 ； 2. 存在系统ZUPT模块 ； 3. 满足ZUPT模式
+  if (is_initialized_vio && 
+      updaterZUPT != nullptr && 
+      (!params.zupt_only_at_beginning || !has_moved_since_zupt))
+  {
     updaterZUPT->feed_imu(message, oldest_time);
   }
 }
@@ -286,46 +295,52 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   // Assert we have valid measurement data and ids
   assert(!message_const.sensor_ids.empty());
   assert(message_const.sensor_ids.size() == message_const.images.size());
-  for (size_t i = 0; i < message_const.sensor_ids.size() - 1; i++) {
+  for (size_t i = 0; i < message_const.sensor_ids.size() - 1; i++) { // 遍历传感器
     assert(message_const.sensor_ids.at(i) != message_const.sensor_ids.at(i + 1));
   }
 
-  // Downsample if we are downsampling
+  // Downsample if we are downsampling 
+  // 降采样默认 false
   ov_core::CameraData message = message_const;
   for (size_t i = 0; i < message.sensor_ids.size() && params.downsample_cameras; i++) {
     cv::Mat img = message.images.at(i);
     cv::Mat mask = message.masks.at(i);
     cv::Mat img_temp, mask_temp;
-    cv::pyrDown(img, img_temp, cv::Size(img.cols / 2.0, img.rows / 2.0));
+    cv::pyrDown(img, img_temp, cv::Size(img.cols / 2.0, img.rows / 2.0)); // 输入图像进行高斯平滑和降采样
     message.images.at(i) = img_temp;
     cv::pyrDown(mask, mask_temp, cv::Size(mask.cols / 2.0, mask.rows / 2.0));
     message.masks.at(i) = mask_temp;
   }
 
   // Perform our feature tracking!
-  trackFEATS->feed_new_camera(message);
+  trackFEATS->feed_new_camera(message); // 提取 角点 + 描述子 + id
 
   // If the aruco tracker is available, the also pass to it
   // NOTE: binocular tracking for aruco doesn't make sense as we by default have the ids
   // NOTE: thus we just call the stereo tracking if we are doing binocular!
   if (is_initialized_vio && trackARUCO != nullptr) {
-    trackARUCO->feed_new_camera(message);
+    trackARUCO->feed_new_camera(message); // todo aruco标签提取,如何作用？// lhq 二维码定位？
   }
   rT2 = boost::posix_time::microsec_clock::local_time();
 
   // Check if we should do zero-velocity, if so update the state with it
   // Note that in the case that we only use in the beginning initialization phase
   // If we have since moved, then we should never try to do a zero velocity update!
-  if (is_initialized_vio && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
+  // 只在初始化阶段使用ZUPT
+  if (is_initialized_vio && updaterZUPT != nullptr && 
+      (!params.zupt_only_at_beginning || !has_moved_since_zupt))
+  {
     // If the same state time, use the previous timestep decision
-    if (state->_timestamp != message.timestamp) {
-      did_zupt_update = updaterZUPT->try_update(state, message.timestamp);
+    if (state->_timestamp != message.timestamp) { // todo 为什么需要判断是否相等？// lhq state是filter state，目的是由state timestamp传播到当前message timestamp
+      did_zupt_update = updaterZUPT->try_update(state, message.timestamp); // 检测系统是否为零速，并更新状态
     }
-    if (did_zupt_update) {
+    if (did_zupt_update) { // todo 时间戳相等时，在做什么工作？
       assert(state->_timestamp == message.timestamp);
-      propagator->clean_old_imu_measurements(message.timestamp + state->_calib_dt_CAMtoIMU->value()(0) - 0.10);
+      // 当前时间戳 + 相机到IMU的时间偏移 - 0.10（留出一些余量）
+      // 例： 99s + 0.05 - 0.1 = 98.95s， 清除98.95s之前的imu数据
+      propagator->clean_old_imu_measurements( message.timestamp + state->_calib_dt_CAMtoIMU->value()(0) - 0.10);
       updaterZUPT->clean_old_imu_measurements(message.timestamp + state->_calib_dt_CAMtoIMU->value()(0) - 0.10);
-      propagator->invalidate_cache();
+      propagator->invalidate_cache(); // 将使用于快速传播的缓存无效化
       return;
     }
   }

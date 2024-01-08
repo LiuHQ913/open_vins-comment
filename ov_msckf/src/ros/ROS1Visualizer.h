@@ -108,6 +108,7 @@ public:
   void visualize_final();
 
   /// Callback for inertial information
+  /// todo 是多线程？
   void callback_inertial(const sensor_msgs::Imu::ConstPtr &msg);
 
   /// Callback for monocular cameras information
@@ -171,7 +172,7 @@ protected:
   bool start_time_set = false;
   boost::posix_time::ptime rT1, rT2;
 
-  // Thread atomics
+  // Thread atomics 原子变量可以在多个线程中安全地读取和修改这个值，而不需要额外的同步机制，如互斥锁。
   std::atomic<bool> thread_update_running;
 
   /// Queue up camera measurements sorted by time and trigger once we have

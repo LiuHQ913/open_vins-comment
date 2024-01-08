@@ -70,8 +70,15 @@ public:
    * Given a specified grid size, this will try to extract fast features from each grid.
    * It will then return the best from each grid in the return vector.
    */
-  static void perform_griding(const cv::Mat &img, const cv::Mat &mask, std::vector<cv::KeyPoint> &pts, int num_features, int grid_x,
-                              int grid_y, int threshold, bool nonmaxSuppression) {
+  static void perform_griding(const cv::Mat &img, 
+                              const cv::Mat &mask, 
+                              std::vector<cv::KeyPoint> &pts, 
+                              int num_features, 
+                              int grid_x,
+                              int grid_y, 
+                              int threshold, 
+                              bool nonmaxSuppression) 
+  {
 
     // We want to have equally distributed features
     // NOTE: If we have more grids than number of total points, we calc the biggest grid we can do
@@ -79,6 +86,11 @@ public:
     // NOTE:    -> 1 = num_features / (grid_x * grid_y))
     // NOTE:    -> grid_x = ratio * grid_y (keep the original grid ratio)
     // NOTE:    -> grid_y = sqrt(num_features / ratio)
+    /*
+      note 确保网格数量的大小（grid_x * grid_y）小于特征点的数量（num_features）
+      如果大于，就通过调整网格的宽度和高度来增大网格的大小，确保每个网格至少有一个特征点。
+      为了在保持原始网格宽高比的情况下，尽可能地减小网格的数量，使得每个网格至少包含一个特征点。
+    */
     if (num_features < grid_x * grid_y) {
       double ratio = (double)grid_x / (double)grid_y;
       grid_y = std::ceil(std::sqrt(num_features / ratio));
@@ -90,20 +102,23 @@ public:
     assert(num_features_grid > 0);
 
     // Calculate the size our extraction boxes should be
-    int size_x = img.cols / grid_x;
-    int size_y = img.rows / grid_y;
+    int size_x = img.cols / grid_x; // 网格的像素宽
+    int size_y = img.rows / grid_y; // 网格的像素高
 
     // Make sure our sizes are not zero
     assert(size_x > 0);
     assert(size_y > 0);
 
     // Parallelize our 2d grid extraction!!
+    // 对于不能完全放下一个网格的部分，将其忽略。
     int ct_cols = std::floor(img.cols / size_x);
     int ct_rows = std::floor(img.rows / size_y);
     std::vector<std::vector<cv::KeyPoint>> collection(ct_cols * ct_rows);
+    // note 并行提取
     parallel_for_(cv::Range(0, ct_cols * ct_rows), LambdaBody([&](const cv::Range &range) {
                     for (int r = range.start; r < range.end; r++) {
                       // Calculate what cell xy value we are in
+                      // note 计算每个网格的左上角坐标
                       int x = r % ct_cols * size_x;
                       int y = r / ct_cols * size_y;
 
@@ -119,12 +134,13 @@ public:
                       cv::FAST(img(img_roi), pts_new, threshold, nonmaxSuppression);
 
                       // Now lets get the top number from this
+                      // code 算法谓词 Grider_FAST::compare_response，大的在前
                       std::sort(pts_new.begin(), pts_new.end(), Grider_FAST::compare_response);
 
                       // Append the "best" ones to our vector
                       // Note that we need to "correct" the point u,v since we extracted it in a ROI
                       // So we should append the location of that ROI in the image
-                      for (size_t i = 0; i < (size_t)num_features_grid && i < pts_new.size(); i++) {
+                      for (size_t i = 0; i < (size_t)num_features_grid && i < pts_new.size(); i++) { // 遍历网格中的特征点
 
                         // Create keypoint
                         cv::KeyPoint pt_cor = pts_new.at(i);
@@ -137,7 +153,7 @@ public:
 
                         // Check if it is in the mask region
                         // NOTE: mask has max value of 255 (white) if it should be removed
-                        if (mask.at<uint8_t>((int)pt_cor.pt.y, (int)pt_cor.pt.x) > 127)
+                        if (mask.at<uint8_t>((int)pt_cor.pt.y, (int)pt_cor.pt.x) > 127) // 在掩码区域内中查看是否被占据
                           continue;
                         collection.at(r).push_back(pt_cor);
                       }
@@ -146,7 +162,7 @@ public:
 
     // Combine all the collections into our single vector
     for (size_t r = 0; r < collection.size(); r++) {
-      pts.insert(pts.end(), collection.at(r).begin(), collection.at(r).end());
+      pts.insert(pts.end(), collection.at(r).begin(), collection.at(r).end()); // code 二维vector数据合并
     }
 
     // Return if no points
@@ -156,20 +172,27 @@ public:
     // Sub-pixel refinement parameters
     cv::Size win_size = cv::Size(5, 5);
     cv::Size zero_zone = cv::Size(-1, -1);
+    /*
+    cv::TermCriteria::COUNT 表示迭代次数达到设定值时终止，
+    cv::TermCriteria::EPS 表示当结果的精度达到设定值时终止。
+    这两个条件是通过加法操作符组合在一起的，表示满足任一条件时算法就会终止
+    */
     cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 20, 0.001);
 
     // Get vector of points
     std::vector<cv::Point2f> pts_refined;
     for (size_t i = 0; i < pts.size(); i++) {
-      pts_refined.push_back(pts.at(i).pt);
+      pts_refined.push_back(pts.at(i).pt); // keypoint转换为point2f
     }
 
     // Finally get sub-pixel for all extracted features
+    // 用于对图像中的角点进行亚像素级别的精确化
+    // todo 操作耗时性？
     cv::cornerSubPix(img, pts_refined, win_size, zero_zone, term_crit);
 
     // Save the refined points!
     for (size_t i = 0; i < pts.size(); i++) {
-      pts.at(i).pt = pts_refined.at(i);
+      pts.at(i).pt = pts_refined.at(i); // 每个keypoint的坐标更新
     }
   }
 };

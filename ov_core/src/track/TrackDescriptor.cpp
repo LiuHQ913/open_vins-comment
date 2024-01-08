@@ -46,15 +46,18 @@ void TrackDescriptor::feed_new_camera(const CameraData &message) {
   size_t num_images = message.images.size();
   if (num_images == 1) {
     feed_monocular(message, 0);
-  } else if (num_images == 2 && use_stereo) {
+  }
+  else if (num_images == 2 && use_stereo) {
     feed_stereo(message, 0, 1);
-  } else if (!use_stereo) {
+  } 
+  else if (!use_stereo) {
     parallel_for_(cv::Range(0, (int)num_images), LambdaBody([&](const cv::Range &range) {
                     for (int i = range.start; i < range.end; i++) {
                       feed_monocular(message, i);
                     }
                   }));
-  } else {
+  }
+  else {
     PRINT_ERROR(RED "[ERROR]: invalid number of images passed %zu, we only support mono or stereo tracking", num_images);
     std::exit(EXIT_FAILURE);
   }
@@ -66,35 +69,39 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   rT1 = boost::posix_time::microsec_clock::local_time();
 
   // Lock this data feed for this camera
-  size_t cam_id = message.sensor_ids.at(msg_id);
+  size_t cam_id = message.sensor_ids.at(msg_id); // 获取相机ID
   std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
 
   // Histogram equalize
   cv::Mat img, mask;
   if (histogram_method == HistogramMethod::HISTOGRAM) {
     cv::equalizeHist(message.images.at(msg_id), img);
-  } else if (histogram_method == HistogramMethod::CLAHE) {
+  } 
+  else if (histogram_method == HistogramMethod::CLAHE) {
     double eq_clip_limit = 10.0;
     cv::Size eq_win_size = cv::Size(8, 8);
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(eq_clip_limit, eq_win_size);
     clahe->apply(message.images.at(msg_id), img);
-  } else {
+  }
+  else {
     img = message.images.at(msg_id);
   }
   mask = message.masks.at(msg_id);
 
   // If we are the first frame (or have lost tracking), initialize our descriptors
-  if (pts_last.find(cam_id) == pts_last.end() || pts_last[cam_id].empty()) {
-    std::vector<cv::KeyPoint> good_left;
-    std::vector<size_t> good_ids_left;
-    cv::Mat good_desc_left;
-    perform_detection_monocular(img, mask, good_left, good_desc_left, good_ids_left);
+  // todo 单目相机是个单一元素容器？
+  if (pts_last.find(cam_id) == pts_last.end() || pts_last[cam_id].empty()) // todo 这是做什么？
+  {
+    std::vector<cv::KeyPoint> good_left; // 角点
+    std::vector<size_t> good_ids_left;   // 描述子
+    cv::Mat good_desc_left;              // id
+    perform_detection_monocular(img, mask, good_left, good_desc_left, good_ids_left); // 这里确定了角点+描述子+id
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id] = good_left;
-    ids_last[cam_id] = good_ids_left;
-    desc_last[cam_id] = good_desc_left;
+    img_last[cam_id] = img;        // message中image经过直方图均衡化后的图像
+    img_mask_last[cam_id] = mask;  // message中mask，没有变动 // todo 需要更新吗？
+    pts_last[cam_id] = good_left;       // 更新角点 
+    ids_last[cam_id] = good_ids_left;   // 更新id
+    desc_last[cam_id] = good_desc_left; // 更新描述子
     return;
   }
 
@@ -352,19 +359,24 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
   PRINT_ALL("[TIME-DESC]: %.4f seconds for total\n", (rT5 - rT1).total_microseconds() * 1e-6);
 }
 
-void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
-                                                  cv::Mat &desc0, std::vector<size_t> &ids0) {
+void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, 
+                                                  const cv::Mat &mask0, 
+                                                  std::vector<cv::KeyPoint> &pts0,
+                                                  cv::Mat &desc0, 
+                                                  std::vector<size_t> &ids0) 
+{
 
   // Assert that we need features
   assert(pts0.empty());
 
   // Extract our features (use FAST with griding)
-  std::vector<cv::KeyPoint> pts0_ext;
+  std::vector<cv::KeyPoint> pts0_ext; // vector of extracted points we will return
+  // 静态函数，划分网格并提取FAST特征点
   Grider_FAST::perform_griding(img0, mask0, pts0_ext, num_features, grid_x, grid_y, threshold, true);
 
   // For all new points, extract their descriptors
   cv::Mat desc0_ext;
-  this->orb0->compute(img0, pts0_ext, desc0_ext);
+  this->orb0->compute(img0, pts0_ext, desc0_ext); // 计算描述子
 
   // Create a 2D occupancy grid for this current image
   // Note that we scale this down, so that each grid point is equal to a set of pixels
@@ -382,21 +394,26 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, const cv:
     cv::KeyPoint kpt = pts0_ext.at(i);
     int x = (int)kpt.pt.x;
     int y = (int)kpt.pt.y;
-    int x_grid = (int)(kpt.pt.x / (float)min_px_dist);
+    int x_grid = (int)(kpt.pt.x / (float)min_px_dist); // 在第几个格子中
     int y_grid = (int)(kpt.pt.y / (float)min_px_dist);
-    if (x_grid < 0 || x_grid >= size.width || y_grid < 0 || y_grid >= size.height || x < 0 || x >= img0.cols || y < 0 || y >= img0.rows) {
+    if (x_grid < 0 || x_grid >= size.width  ||
+        y_grid < 0 || y_grid >= size.height ||
+        x < 0 || x >= img0.cols ||
+        y < 0 || y >= img0.rows)
+    {
       continue;
     }
     // Check if this keypoint is near another point
-    if (grid_2d.at<uint8_t>(y_grid, x_grid) > 127)
+    if (grid_2d.at<uint8_t>(y_grid, x_grid) > 127) // todo grid_2d都是0值，这个判断有效吗？// lhq 下面会更新
       continue;
     // Else we are good, append our keypoints and descriptors
+    // note 至此确定了 角点+描述子+id
     pts0.push_back(pts0_ext.at(i));
     desc0.push_back(desc0_ext.row((int)i));
     // Set our IDs to be unique IDs here, will later replace with corrected ones, after temporal matching
-    size_t temp = ++currid;
+    size_t temp = ++currid; // code 原子类型的应用 std::atomic<size_t>
     ids0.push_back(temp);
-    grid_2d.at<uint8_t>(y_grid, x_grid) = 255;
+    grid_2d.at<uint8_t>(y_grid, x_grid) = 255; // 更新标记
   }
 }
 

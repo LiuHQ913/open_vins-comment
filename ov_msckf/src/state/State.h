@@ -94,7 +94,8 @@ public:
     Eigen::Matrix3d D_matrix = Eigen::Matrix3d::Identity();
     if (imu_model == StateOptions::ImuModel::KALIBR) {
       D_matrix << vec(0), 0, 0, vec(1), vec(3), 0, vec(2), vec(4), vec(5);
-    } else {
+    } 
+    else {
       D_matrix << vec(0), vec(1), vec(3), 0, vec(2), vec(4), 0, 0, vec(5);
     }
     return D_matrix;

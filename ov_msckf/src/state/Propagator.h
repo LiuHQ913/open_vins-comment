@@ -83,7 +83,7 @@ public:
     auto it0 = imu_data.begin();
     while (it0 != imu_data.end()) {
       if (it0->timestamp < oldest_time) {
-        it0 = imu_data.erase(it0);
+        it0 = imu_data.erase(it0); // code vector移除元素
       } else {
         it0++;
       }
@@ -92,6 +92,7 @@ public:
 
   /**
    * @brief Will invalidate the cache used for fast propagation
+   *        将使用于快速传播的缓存无效化
    */
   void invalidate_cache() { cache_imu_valid = false; }
 
@@ -138,7 +139,9 @@ public:
    * @param warn If we should warn if we don't have enough IMU to propagate with (e.g. fast prop will get warnings otherwise)
    * @return Vector of measurements (if we could compute them)
    */
-  static std::vector<ov_core::ImuData> select_imu_readings(const std::vector<ov_core::ImuData> &imu_data, double time0, double time1,
+  static std::vector<ov_core::ImuData> select_imu_readings(const std::vector<ov_core::ImuData> &imu_data, 
+                                                           double time0,
+                                                           double time1,
                                                            bool warn = true);
 
   /**
@@ -151,15 +154,18 @@ public:
    * @param imu_2 imu at end of interpolation interval
    * @param timestamp Timestamp being interpolated to
    */
-  static ov_core::ImuData interpolate_data(const ov_core::ImuData &imu_1, const ov_core::ImuData &imu_2, double timestamp) {
+  static ov_core::ImuData interpolate_data(const ov_core::ImuData &imu_1, 
+                                           const ov_core::ImuData &imu_2, 
+                                           double timestamp) 
+  {
     // time-distance lambda
     double lambda = (timestamp - imu_1.timestamp) / (imu_2.timestamp - imu_1.timestamp);
     // PRINT_DEBUG("lambda - %d\n", lambda);
     // interpolate between the two times
     ov_core::ImuData data;
     data.timestamp = timestamp;
-    data.am = (1 - lambda) * imu_1.am + lambda * imu_2.am;
-    data.wm = (1 - lambda) * imu_1.wm + lambda * imu_2.wm;
+    data.am = (1 - lambda) * imu_1.am + lambda * imu_2.am; // 插值加速度
+    data.wm = (1 - lambda) * imu_1.wm + lambda * imu_2.wm; // 插值角速度
     return data;
   }
 
