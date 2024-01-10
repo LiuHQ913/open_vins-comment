@@ -127,7 +127,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   bool explicitly_enforce_zero_motion = false;
 
   // Order of our Jacobian
-  std::vector<std::shared_ptr<Type>> Hx_order;
+  std::vector<std::shared_ptr<Type>> Hx_order; // 存放状态变量的指针
   Hx_order.push_back(state->_imu->q());
   Hx_order.push_back(state->_imu->bg());
   Hx_order.push_back(state->_imu->ba());
@@ -135,16 +135,17 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     Hx_order.push_back(state->_imu->v());
   }
 
+  // note 基于惯性的zupt检测
   // Large final matrices used for update (we will compress these)
   int h_size = (integrated_accel_constraint) ? 12 : 9; // note 这里是9维度，q提供3个自由度 // todo 各个开源算法中都是这样吗？
   int m_size = 6 * ((int)imu_recent.size() - 1);       // 一个imu提供6个变量
-  Eigen::MatrixXd H   = Eigen::MatrixXd::Zero(m_size, h_size); // δf(x) = J = δ[imu]/δ[q bg ba] 的维度
-  Eigen::VectorXd res = Eigen::VectorXd::Zero(m_size);         //  f(x) = b = [imu] 的维度
+  Eigen::MatrixXd H   = Eigen::MatrixXd::Zero(m_size, h_size);
+  Eigen::VectorXd res = Eigen::VectorXd::Zero(m_size);
 
   // IMU intrinsic calibration estimates (static)
-  Eigen::Matrix3d Dw = State::Dm(state->_options.imu_model, state->_calib_imu_dw->value());
+  Eigen::Matrix3d Dw = State::Dm(state->_options.imu_model, state->_calib_imu_dw->value()); // imu 内参矩阵，这里都是单位矩阵
   Eigen::Matrix3d Da = State::Dm(state->_options.imu_model, state->_calib_imu_da->value());
-  Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value());
+  Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value()); // 零矩阵
 
   // 参考 https://docs.openvins.com/update-zerovelocity.html#update-zerovelocity-meas
   // Loop through all our IMU and construct the residual and Jacobian
@@ -155,75 +156,100 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // a_true = a_m - ba - R*g - na  // todo R、g的坐标系 // lhq g在G系下
   // v_true = v_k - g*dt + R^T*(a_m - ba - na)*dt
   double dt_summed = 0;
-  for (size_t i = 0; i < imu_recent.size() - 1; i++) {
+  for (size_t i = 0; i < imu_recent.size() - 1; i++) { // 遍历imu测量
 
     // Precomputed values
     double dt = imu_recent.at(i + 1).timestamp - imu_recent.at(i).timestamp;
-    Eigen::Vector3d a_hat = state->_calib_imu_ACCtoIMU->Rot()  * Da * (imu_recent.at(i).am - state->_imu->bias_a());
+    /*
+      残差： err = a_true - measurement function
+            a_true = 0 => err = -measurement function
+      残差： a_hat = am - ba
+      残差： w_hat = wm - bg 
+      注意，白噪声的均值为0
+    */
+    Eigen::Vector3d a_hat = state->_calib_imu_ACCtoIMU->Rot()  * Da * (imu_recent.at(i).am - state->_imu->bias_a()); // imu系下的测量
     Eigen::Vector3d w_hat = state->_calib_imu_GYROtoIMU->Rot() * Dw * (imu_recent.at(i).wm - state->_imu->bias_g() - Tg * a_hat);
 
+    // note 连续噪声 -> 离散噪声 ; 白化
     // Measurement noise (convert from continuous to discrete)
     // NOTE: The dt time might be different if we have "cut" any imu measurements
     // NOTE: We are performing "whittening" thus, we will decompose R_meas^-1 = L*L^t
     // NOTE: This is then multiplied to the residual and Jacobian (equivalent to just updating with R_meas)
     // NOTE: See Maybeck Stochastic Models, Estimation, and Control Vol. 1 Equations (7-21a)-(7-21c)
-    double w_omega = std::sqrt(dt) / _noises.sigma_w;
+    double w_omega = std::sqrt(dt) / _noises.sigma_w; // todo 这是标准差的倒数吗？
     double w_accel = std::sqrt(dt) / _noises.sigma_a;
     double w_accel_v = 1.0 / (std::sqrt(dt) * _noises.sigma_a);
 
     // Measurement residual (true value is zero)
-    res.block(6 * i + 0, 0, 3, 1) = -w_omega * w_hat;
-    if (!integrated_accel_constraint) {
+    res.block(6 * i + 0, 0, 3, 1) = -w_omega * w_hat; // todo 带有权重的残差？
+    if (!integrated_accel_constraint) {  // 加速度残差
       res.block(6 * i + 3, 0, 3, 1) = -w_accel * (a_hat - state->_imu->Rot() * _gravity);
-    } 
-    else {
+    }
+    else { // 速度残差
       res.block(6 * i + 3, 0, 3, 1) = -w_accel_v * (state->_imu->vel() - _gravity * dt + state->_imu->Rot().transpose() * a_hat * dt);
     }
 
     // Measurement Jacobian
+    // todo state->_imu->Rot_fej()返回的fej矩阵，是如何计算的？
+    // gpt -w_omega是一个根据时间间隔和噪声标准差计算出的权重，用于在状态估计过程中对角速度测量进行适当的加权和白化
     Eigen::Matrix3d R_GtoI_jacob = (state->_options.do_fej) ? state->_imu->Rot_fej() : state->_imu->Rot();
-    H.block(6 * i + 0, 3, 3, 3) = -w_omega * Eigen::Matrix3d::Identity();
+    H.block(6 * i + 0, 3, 3, 3) = -w_omega * Eigen::Matrix3d::Identity();       // 对bg的导数 // TODO w_omega表示什么 // lhq 白化
     if (!integrated_accel_constraint) {
-      H.block(6 * i + 3, 0, 3, 3) = -w_accel * skew_x(R_GtoI_jacob * _gravity);
-      H.block(6 * i + 3, 6, 3, 3) = -w_accel * Eigen::Matrix3d::Identity();
+      H.block(6 * i + 3, 0, 3, 3) = -w_accel * skew_x(R_GtoI_jacob * _gravity); // 对R_GtoI的导数
+      H.block(6 * i + 3, 6, 3, 3) = -w_accel * Eigen::Matrix3d::Identity();     // 对ba的导数
     } 
     else {
       H.block(6 * i + 3, 0, 3, 3) = -w_accel_v * R_GtoI_jacob.transpose() * skew_x(a_hat) * dt;
       H.block(6 * i + 3, 6, 3, 3) = -w_accel_v * R_GtoI_jacob.transpose() * dt;
-      H.block(6 * i + 3, 9, 3, 3) = w_accel_v * Eigen::Matrix3d::Identity();
+      H.block(6 * i + 3, 9, 3, 3) =  w_accel_v * Eigen::Matrix3d::Identity();
     }
     dt_summed += dt;
   }
 
   // Compress the system (we should be over determined)
-  UpdaterHelper::measurement_compress_inplace(H, res);
+  UpdaterHelper::measurement_compress_inplace(H, res); // 左零空间投影，排除特征点量信息，H与res减去一个特征量的维度（3维）
   if (H.rows() < 1) {
     return false;
   }
 
+  // note 对噪声矩阵进行缩放，通常是为了增加噪声的方差，使得系统更加保守，不能太相信imu。
   // Multiply our noise matrix by a fixed amount
   // We typically need to treat the IMU as being "worst" to detect / not become overconfident
-  Eigen::MatrixXd R = _zupt_noise_multiplier * Eigen::MatrixXd::Identity(res.rows(), res.rows());
+  Eigen::MatrixXd R = _zupt_noise_multiplier * Eigen::MatrixXd::Identity(res.rows(), res.rows()); // 默认单位矩阵 // todo 为什么是这个大小
 
+  // note bias 协方差传播 // todo（帧间传播）？
+  // todo 这里是如何计算bias的协方差的？
+  // 雅可比矩阵为单位矩阵
   // Next propagate the biases forward in time
-  // NOTE: G*Qd*G^t = dt*Qd*dt = dt*(1/dt*Qc)*dt = dt*Qc
+  // NOTE: G*Qd*G^t = dt*Qd*dt = dt*(1/dt*Qc)*dt = dt*Qc // note 
   Eigen::MatrixXd Q_bias = Eigen::MatrixXd::Identity(6, 6);
-  Q_bias.block(0, 0, 3, 3) *= dt_summed * _noises.sigma_wb_2;
+  Q_bias.block(0, 0, 3, 3) *= dt_summed * _noises.sigma_wb_2; // imu测量累积时间 * 角度随机游走协方差
   Q_bias.block(3, 3, 3, 3) *= dt_summed * _noises.sigma_ab_2;
 
+  // note 卡方距离检验（Chi-squared test），用于确定状态更新是否应该被接受。用于确定观测数据是否与预期的分布一致
+  /*
+    gpt 在这段代码中，作者提到了关于IMU偏差（bias）的传播。
+    gpt 通常，在状态估计中，我们会在每次更新之前对状态进行预测或传播，以考虑在两次更新之间的系统动态。
+    gpt 在这种情况下，偏差的传播是指在状态更新之前，根据IMU的随机游走模型预测偏差的变化。
+    gpt 然而，作者在这里指出，他们并没有首先执行这个传播步骤，因为如果卡方检验（chi-squared test）失败了，他们希望直接返回并执行正常的逻辑处理。
+    gpt 这意味着，只有在卡方检验通过，状态更新被接受的情况下，他们才会考虑偏差的传播。
+  */
   // Chi2 distance check
   // NOTE: we also append the propagation we "would do before the update" if this was to be accepted (just the bias evolution)
   // NOTE: we don't propagate first since if we fail the chi2 then we just want to return and do normal logic
   Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hx_order);
-  if (model_time_varying_bias) {
-    P_marg.block(3, 3, 6, 6) += Q_bias;
+  if (model_time_varying_bias) { // 考虑随时间变化的随机游走偏差
+    // 起始位置[3 3]，大小6x6
+    P_marg.block(3, 3, 6, 6) += Q_bias; // gpt 将偏差的噪声协方差矩阵Q_bias添加到边缘协方差矩阵的对应块中。这是为了考虑在状态更新之前偏差的随机游走。
   }
-  Eigen::MatrixXd S = H * P_marg * H.transpose() + R;
+  Eigen::MatrixXd S = H * P_marg * H.transpose() + R; // note 协方差传播，参考文档https://docs.openvins.com/update-zerovelocity.html
+  // code S.llt().solve(res)是利用S的Cholesky分解来解线性方程 S*x=res，得到向量x，即 x=(S^-1)*res。chi2 = res*(S^-1)*res
+  // note 卡方距离检验（Chi-squared test），以判断当前的状态估计是否可靠。
   double chi2 = res.dot(S.llt().solve(res));
 
   // Get our threshold (we precompute up to 1000 but handle the case that it is more)
   double chi2_check;
-  if (res.rows() < 1000) {
+  if (res.rows() < 1000) { // todo 怎么是res表示自由度？ 自由度：自由变化的个数（观测值）
     chi2_check = chi_squared_table[res.rows()];
   } 
   else {
@@ -231,14 +257,16 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     chi2_check = boost::math::quantile(chi_squared_dist, 0.95);
     PRINT_WARNING(YELLOW "[ZUPT]: chi2_check over the residual limit - %d\n" RESET, (int)res.rows());
   }
+  // --- end 基于惯性的zupt检测
 
+  // note 基于视差的zupt检测
   // Check if the image disparity
-  bool disparity_passed = false;
+  bool disparity_passed = false; // 标识图像视差检查是否通过
   if (override_with_disparity_check) {
 
     // Get the disparity statistics from this image to the previous
     double time0_cam = state->_timestamp;
-    double time1_cam = timestamp;
+    double time1_cam = timestamp; // Next camera timestamp we want to see if we should propagate to
     int num_features = 0;
     double disp_avg = 0.0;
     double disp_var = 0.0;

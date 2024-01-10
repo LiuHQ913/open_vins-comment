@@ -237,6 +237,7 @@ Eigen::MatrixXd StateHelper::get_marginal_covariance(std::shared_ptr<State> stat
 
   // For each variable, lets copy over all other variable cross terms
   // Note: this copies over itself to when i_index=k_index
+  // todo state的协方差是什么时候确定的？
   int i_index = 0;
   for (size_t i = 0; i < small_variables.size(); i++) {
     int k_index = 0;

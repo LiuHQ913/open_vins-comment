@@ -114,7 +114,7 @@ public:
 
   /**
    * @brief This will project the left nullspace of H_f onto the linear system.
-   *
+   *        函数的主要目的是通过给定旋转来压缩观测矩阵和残差向量，从而减少后续计算的复杂性。(Givens分解)
    * Please see the @ref update-null for details on how this works.
    * This is the MSCKF nullspace projection which removes the dependency on the feature state.
    * Note that this is done **in place** so all matrices will be different after a function call.

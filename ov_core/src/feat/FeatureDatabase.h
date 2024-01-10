@@ -112,6 +112,9 @@ public:
    *
    * This function will return all features that have the specified time in them.
    * This would be used to get all features that occurred at a specific clone/state.
+   * @param timestamp Time that we want to get features at
+   * @param remove Set to true if you want to remove the feature from the database (you will need to handle the freeing of memory)
+   * @param skip_deleted Set to true if you want to skip features that have been deleted
    */
   std::vector<std::shared_ptr<Feature>> features_containing(double timestamp, bool remove = false, bool skip_deleted = false);
 

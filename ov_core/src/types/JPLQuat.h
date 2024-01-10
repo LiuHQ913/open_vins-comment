@@ -92,7 +92,8 @@ namespace ov_type {
 class JPLQuat : public Type {
 
 public:
-  JPLQuat() : Type(3) {
+  JPLQuat() : Type(3) 
+  {
     Eigen::Vector4d q0 = Eigen::Vector4d::Zero();
     q0(3) = 1.0;
     set_value_internal(q0);

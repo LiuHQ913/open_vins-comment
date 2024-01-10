@@ -57,8 +57,13 @@ public:
    * @param disp_var Variance of the disparities
    * @param total_feats Total number of common features
    */
-  static void compute_disparity(std::shared_ptr<ov_core::FeatureDatabase> db, double time0, double time1, double &disp_mean,
-                                double &disp_var, int &total_feats) {
+  static void compute_disparity(std::shared_ptr<ov_core::FeatureDatabase> db, 
+                                double time0, 
+                                double time1, 
+                                double &disp_mean,
+                                double &disp_var, 
+                                int &total_feats) 
+{
 
     // Get features seen from the first image
     std::vector<std::shared_ptr<Feature>> feats0 = db->features_containing(time0, false, true);

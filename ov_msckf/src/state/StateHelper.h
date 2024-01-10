@@ -100,7 +100,7 @@ public:
 
   /**
    * @brief For a given set of variables, this will this will calculate a smaller covariance.
-   *
+        gpt 边际协方差是指在多元随机变量中，只考虑其中一部分变量时，这部分变量的协方差。这个方法可以用于在不需要完整协方差矩阵的情况下进行卡方检验
    * That only includes the ones specified with all crossterms.
    * Thus the size of the return will be the summed dimension of all the passed variables.
    * Normal use for this is a chi-squared check before update (where you don't need the full covariance).

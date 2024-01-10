@@ -35,7 +35,7 @@ namespace ov_msckf {
 struct StateOptions {
 
   /// Bool to determine whether or not to do first estimate Jacobians
-  bool do_fej = true;
+  bool do_fej = true; // if first-estimate Jacobians should be used (enable for good consistency)
 
   /// Numerical integration methods
   enum IntegrationMethod { DISCRETE, RK4, ANALYTICAL };
@@ -94,7 +94,7 @@ struct StateOptions {
   /// Nice print function of what parameters we have loaded
   void print(const std::shared_ptr<ov_core::YamlParser> &parser = nullptr) {
     if (parser != nullptr) {
-      parser->parse_config("use_fej", do_fej);
+      parser->parse_config("use_fej", do_fej); // 读取配置文件中的use_fej参数
 
       // Integration method
       std::string integration_str = "rk4";

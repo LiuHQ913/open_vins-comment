@@ -84,7 +84,7 @@ public:
    * @brief Gyroscope and accelerometer intrinsic matrix (scale imperfection and axis misalignment)
    *
    * If kalibr model, lower triangular of the matrix is used
-   * If rpng model, upper triangular of the matrix is used
+   * If   rpng model, upper triangular of the matrix is used
    *
    * @return 3x3 matrix of current imu gyroscope / accelerometer intrinsics
    */
@@ -94,7 +94,7 @@ public:
     Eigen::Matrix3d D_matrix = Eigen::Matrix3d::Identity();
     if (imu_model == StateOptions::ImuModel::KALIBR) {
       D_matrix << vec(0), 0, 0, vec(1), vec(3), 0, vec(2), vec(4), vec(5);
-    } 
+    }
     else {
       D_matrix << vec(0), vec(1), vec(3), 0, vec(2), vec(4), 0, 0, vec(5);
     }
@@ -175,10 +175,10 @@ public:
   std::shared_ptr<ov_type::Vec> _calib_imu_tg;
 
   /// Rotation from gyroscope frame to the "IMU" accelerometer frame (kalibr model)
-  std::shared_ptr<ov_type::JPLQuat> _calib_imu_GYROtoIMU;
+  std::shared_ptr<ov_type::JPLQuat> _calib_imu_GYROtoIMU; // 单位矩阵
 
   /// Rotation from accelerometer to the "IMU" gyroscope frame frame (rpng model)
-  std::shared_ptr<ov_type::JPLQuat> _calib_imu_ACCtoIMU;
+  std::shared_ptr<ov_type::JPLQuat> _calib_imu_ACCtoIMU; // 单位矩阵
 
 private:
   // Define that the state helper is a friend class of this class

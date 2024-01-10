@@ -140,7 +140,7 @@ inline Eigen::Matrix<double, 3, 3> skew_x(const Eigen::Matrix<double, 3, 1> &w) 
 
 /**
  * @brief Converts JPL quaterion to SO(3) rotation matrix
- *
+ *        转换JPL四元数到SO(3)旋转矩阵
  * This is based on equation 62 in [Indirect Kalman Filter for 3D Attitude Estimation](http://mars.cs.umn.edu/tr/reports/Trawny05b.pdf):
  * \f{align*}{
  *  \mathbf{R} = (2q_4^2-1)\mathbf{I}_3-2q_4\lfloor\mathbf{q}\times\rfloor+2\mathbf{q}\mathbf{q}^\top

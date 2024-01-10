@@ -166,7 +166,11 @@ std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_containing_older
   return feats_old;
 }
 
-std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_containing(double timestamp, bool remove, bool skip_deleted) {
+std::vector<std::shared_ptr<Feature>> 
+FeatureDatabase::features_containing(double timestamp, // 查找的时间戳
+                                     bool remove, 
+                                     bool skip_deleted) 
+{
 
   // Our vector of old features
   std::vector<std::shared_ptr<Feature>> feats_has_timestamp;
@@ -188,6 +192,7 @@ std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_containing(doubl
         break;
       }
     }
+    // note 会根据用户的选择，删除或者保留
     // Remove this feature if it contains the specified timestamp
     if (has_timestamp) {
       feats_has_timestamp.push_back((*it).second);
