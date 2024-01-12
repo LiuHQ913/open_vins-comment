@@ -66,27 +66,32 @@ public:
    * +
    * \mathbf{n}
    * \f]
-   *
+   * 
    * @param state Pointer to state
    * @param order_NEW Contiguous variables that have evolved according to this state transition
    * @param order_OLD Variable ordering used in the state transition
    * @param Phi State transition matrix (size order_NEW by size order_OLD)
    * @param Q Additive state propagation noise matrix (size order_NEW by size order_NEW)
    */
-  static void EKFPropagation(std::shared_ptr<State> state, const std::vector<std::shared_ptr<ov_type::Type>> &order_NEW,
-                             const std::vector<std::shared_ptr<ov_type::Type>> &order_OLD, const Eigen::MatrixXd &Phi,
+  static void EKFPropagation(std::shared_ptr<State> state, 
+                             const std::vector<std::shared_ptr<ov_type::Type>> &order_NEW,
+                             const std::vector<std::shared_ptr<ov_type::Type>> &order_OLD, 
+                             const Eigen::MatrixXd &Phi,
                              const Eigen::MatrixXd &Q);
 
   /**
    * @brief Performs EKF update of the state (see @ref linear-meas page)
-   * @param state Pointer to state
-   * @param H_order Variable ordering used in the compressed Jacobian
-   * @param H Condensed Jacobian of updating measurement
-   * @param res Residual of updating measurement
-   * @param R Updating measurement covariance
+   * @param state Pointer to state 
+   * @param H_order Variable ordering used in the compressed Jacobian 压缩雅可比矩阵中使用的变量排序
+   * @param H Condensed Jacobian of updating measurement  更新测量的压缩雅可比矩阵
+   * @param res Residual of updating measurement  更新测量的残差
+   * @param R   Updating measurement covariance   更新测量的协方差
    */
-  static void EKFUpdate(std::shared_ptr<State> state, const std::vector<std::shared_ptr<ov_type::Type>> &H_order, const Eigen::MatrixXd &H,
-                        const Eigen::VectorXd &res, const Eigen::MatrixXd &R);
+  static void EKFUpdate(std::shared_ptr<State> state, 
+                        const std::vector<std::shared_ptr<ov_type::Type>> &H_order, 
+                        const Eigen::MatrixXd &H,
+                        const Eigen::VectorXd &res,
+                        const Eigen::MatrixXd &R);
 
   /**
    * @brief This will set the initial covaraince of the specified state elements.

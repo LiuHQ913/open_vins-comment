@@ -38,7 +38,7 @@ public:
    */
   Vec(int dim) : Type(dim) {
     _value = Eigen::VectorXd::Zero(dim);
-    _fej = Eigen::VectorXd::Zero(dim);
+    _fej   = Eigen::VectorXd::Zero(dim);
   }
 
   ~Vec() {}
@@ -49,7 +49,7 @@ public:
    * \f{align*}{
    * \mathbf{v} &= \hat{\mathbf{v}} + \tilde{\mathbf{v}}_{dx}
    * \f}
-   *
+   * v = hat{v} + tilde{v}_dx
    * @param dx Additive error state correction
    */
   void update(const Eigen::VectorXd &dx) override {

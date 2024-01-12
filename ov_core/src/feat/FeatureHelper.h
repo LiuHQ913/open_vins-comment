@@ -73,11 +73,11 @@ public:
     for (auto &feat : feats0) {
 
       // Get the two uvs for both times
-      for (auto &campairs : feat->timestamps) {
+      for (auto &campairs : feat->timestamps) { // code 遍历map容器的键，即相机id
 
         // First find the two timestamps
-        size_t camid = campairs.first;
-        auto it0 = std::find(feat->timestamps.at(camid).begin(), feat->timestamps.at(camid).end(), time0);
+        size_t camid = campairs.first; // 获取相机id
+        auto it0 = std::find(feat->timestamps.at(camid).begin(), feat->timestamps.at(camid).end(), time0); // 在该相机id下查找time0时间戳
         auto it1 = std::find(feat->timestamps.at(camid).begin(), feat->timestamps.at(camid).end(), time1);
         if (it0 == feat->timestamps.at(camid).end() || it1 == feat->timestamps.at(camid).end())
           continue;
@@ -87,7 +87,7 @@ public:
         // Now lets calculate the disparity
         Eigen::Vector2f uv0 = feat->uvs.at(camid).at(idx0).block(0, 0, 2, 1);
         Eigen::Vector2f uv1 = feat->uvs.at(camid).at(idx1).block(0, 0, 2, 1);
-        disparities.push_back((uv1 - uv0).norm());
+        disparities.push_back((uv1 - uv0).norm()); // note 计算两帧之间的视差
       }
     }
 

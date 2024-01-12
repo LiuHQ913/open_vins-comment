@@ -136,7 +136,7 @@ protected:
   Eigen::Vector3d _gravity;
 
   /// Max velocity (m/s) that we should consider a zupt with
-  double _zupt_max_velocity = 1.0;
+  double _zupt_max_velocity = 1.0; // zupt_max_velocity
 
   /// Multiplier of our IMU noise matrix (default should be 1.0)
   double _zupt_noise_multiplier = 1.0;

@@ -33,19 +33,22 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 
-void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector<std::shared_ptr<Type>> &order_NEW,
-                                 const std::vector<std::shared_ptr<Type>> &order_OLD, const Eigen::MatrixXd &Phi,
-                                 const Eigen::MatrixXd &Q) {
-
+void StateHelper::EKFPropagation(std::shared_ptr<State> state, 
+                                 const std::vector<std::shared_ptr<Type>> &order_NEW,
+                                 const std::vector<std::shared_ptr<Type>> &order_OLD, 
+                                 const Eigen::MatrixXd &Phi,
+                                 const Eigen::MatrixXd &Q) 
+{
+  // --- check 模块
   // We need at least one old and new variable
   if (order_NEW.empty() || order_OLD.empty()) {
     PRINT_ERROR(RED "StateHelper::EKFPropagation() - Called with empty variable arrays!\n" RESET);
     std::exit(EXIT_FAILURE);
   }
 
-  // Loop through our Phi order and ensure that they are continuous in memory
+  // Loop through our Phi order and ensure that they are continuous in memory // todo 为什么要检查连续内存
   int size_order_NEW = order_NEW.at(0)->size();
-  for (size_t i = 0; i < order_NEW.size() - 1; i++) {
+  for (size_t i = 0; i < order_NEW.size() - 1; i++) { // code size-1 遍历到倒数第二个
     if (order_NEW.at(i)->id() + order_NEW.at(i)->size() != order_NEW.at(i + 1)->id()) {
       PRINT_ERROR(RED "StateHelper::EKFPropagation() - Called with non-contiguous state elements!\n" RESET);
       PRINT_ERROR(
@@ -66,39 +69,57 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
   assert(size_order_OLD == Phi.cols());
   assert(size_order_NEW == Q.cols());
   assert(size_order_NEW == Q.rows());
+  // --- end check
 
   // Get the location in small phi for each measuring variable
   int current_it = 0;
   std::vector<int> Phi_id;
-  for (const auto &var : order_OLD) {
+  for (const auto &var : order_OLD) { // 重排id
     Phi_id.push_back(current_it);
     current_it += var->size();
   }
 
+  // 从Pk|k转换到Pk+1|k
   // Loop through all our old states and get the state transition times it
   // Cov_PhiT = [ Pxx ] [ Phi' ]'
-  Eigen::MatrixXd Cov_PhiT = Eigen::MatrixXd::Zero(state->_Cov.rows(), Phi.rows());
+  Eigen::MatrixXd Cov_PhiT = Eigen::MatrixXd::Zero(state->_Cov.rows(), Phi.rows()); // 大小：状态量协方差所有行数 x 状态转移矩阵行数 如[nx6]
   for (size_t i = 0; i < order_OLD.size(); i++) {
     std::shared_ptr<Type> var = order_OLD.at(i);
     Cov_PhiT.noalias() +=
-        state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size()) * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose();
+        // 如：状态量协方差矩阵[nx3] * 状态转移矩阵[6，3]^T = Cov_PhiT矩阵[nx6]
+        /* note 这里是累加（trick：用到了矩阵的性质）
+          [a0]           [0 a0]
+          [a1]           [0 a1]
+          [a2] * [0 I] = [0 a2] 
+          [a3]           [0 a3]
+          [a4]           [0 a4]
+        */
+        state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size())  // 获取[0，变量id]矩阵（协方差），大小：状态量协方差所有行数 x 变量维度数（如：nx3）
+          * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose(); // 获取[0, 重排id]
+        // 注： 当状态转移矩阵为单位矩阵时，此操作为空。即 Cov_PhiT = state->_Cov
   }
 
   // Get Phi_NEW*Covariance*Phi_NEW^t + Q
+  // todo 做下打印，看看Phi_Cov_PhiT矩阵是什么？
   Eigen::MatrixXd Phi_Cov_PhiT = Q.selfadjointView<Eigen::Upper>();
   for (size_t i = 0; i < order_OLD.size(); i++) {
+    // 如：状态转移矩阵[6，3] * 协防差矩阵[3, 6] + Q
     std::shared_ptr<Type> var = order_OLD.at(i);
-    Phi_Cov_PhiT.noalias() += Phi.block(0, Phi_id[i], Phi.rows(), var->size()) * Cov_PhiT.block(var->id(), 0, var->size(), Phi.rows());
+    Phi_Cov_PhiT.noalias() += Phi.block(0, Phi_id[i], Phi.rows(), var->size())          // 获取[0, 重排id]
+                                * Cov_PhiT.block(var->id(), 0, var->size(), Phi.rows());// 获取[变量id, 0]矩阵, 大小：变量维度数 x 状态转移矩阵行数（如：3x6）
+    // 注：根据var->id()找到相应的方差矩阵，进行传播 Phi_NEW*Covariance*Phi_NEW^t + Q
   }
 
-  // We are good to go!
+  // We are good to go! 可以进行下一步！
   int start_id = order_NEW.at(0)->id();
   int phi_size = Phi.rows();
   int total_size = state->_Cov.rows();
-  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose();
+  // kernel 维护状态变量协方差矩阵
+  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose(); // todo 非对角矩阵块怎么是这个样子呢？
   state->_Cov.block(0, start_id, total_size, phi_size) = Cov_PhiT;
   state->_Cov.block(start_id, start_id, phi_size, phi_size) = Phi_Cov_PhiT;
 
+  // note 检查协方差矩阵的(半)正定性
   // We should check if we are not positive semi-definitate (i.e. negative diagionals is not s.p.d)
   Eigen::VectorXd diags = state->_Cov.diagonal();
   bool found_neg = false;
@@ -113,20 +134,24 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
   }
 }
 
-void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std::shared_ptr<Type>> &H_order, const Eigen::MatrixXd &H,
-                            const Eigen::VectorXd &res, const Eigen::MatrixXd &R) {
+void StateHelper::EKFUpdate(std::shared_ptr<State> state, 
+                            const std::vector<std::shared_ptr<Type>> &H_order, 
+                            const Eigen::MatrixXd &H,
+                            const Eigen::VectorXd &res, 
+                            const Eigen::MatrixXd &R) 
+{
 
   //==========================================================
   //==========================================================
-  // Part of the Kalman Gain K = (P*H^T)*S^{-1} = M*S^{-1}
+  // Part of the Kalman Gain K = (P*H^T)*S^{-1} = M*S^{-1} 其中S是协方差矩阵 = H*Cov*H' + R
   assert(res.rows() == R.rows());
   assert(H.rows() == res.rows());
-  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows());
+  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows()); // 大小：状态量协方差所有行数 x 测量残差行数
 
   // Get the location in small jacobian for each measuring variable
   int current_it = 0;
   std::vector<int> H_id;
-  for (const auto &meas_var : H_order) {
+  for (const auto &meas_var : H_order) { // 重排id
     H_id.push_back(current_it);
     current_it += meas_var->size();
   }
@@ -136,11 +161,12 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   // For each active variable find its M = P*H^T
   for (const auto &var : state->_variables) {
     // Sum up effect of each subjacobian = K_i= \sum_m (P_im Hm^T)
-    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows());
+    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows()); // 大小：变量维度数 x 测量残差行数 (如：3xn)
     for (size_t i = 0; i < H_order.size(); i++) {
-      std::shared_ptr<Type> meas_var = H_order[i];
-      M_i.noalias() += state->_Cov.block(var->id(), meas_var->id(), var->size(), meas_var->size()) *
-                       H.block(0, H_id[i], H.rows(), meas_var->size()).transpose();
+      std::shared_ptr<Type> meas_var = H_order[i]; // 获取排序队列中的变量
+      // 如 [3 3] * [n 3]^T , 其中[3 3]是状态变量协方差指定
+      M_i.noalias() += state->_Cov.block(var->id(), meas_var->id(), var->size(), meas_var->size()) * // 获取(协方差)矩阵[状态变量id, 排序队列中变量id]，大小：变量维度数 x 测量维度数（如：3x3）
+                        H.block(0, H_id[i], H.rows(), meas_var->size()).transpose();                 // 获取(压缩)矩阵[0, 重排id]， 大小：压缩雅可比矩阵行数 x 排序队列中的变量维度数（如：nx3）
     }
     M_a.block(var->id(), 0, var->size(), res.rows()) = M_i;
   }
@@ -149,7 +175,7 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   //==========================================================
   // Get covariance of the involved terms
   Eigen::MatrixXd P_small = StateHelper::get_marginal_covariance(state, H_order);
-
+  
   // Residual covariance S = H*Cov*H' + R
   Eigen::MatrixXd S(R.rows(), R.rows());
   S.triangularView<Eigen::Upper>() = H * P_small * H.transpose();
@@ -159,12 +185,12 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   // Invert our S (should we use a more stable method here??)
   Eigen::MatrixXd Sinv = Eigen::MatrixXd::Identity(R.rows(), R.rows());
   S.selfadjointView<Eigen::Upper>().llt().solveInPlace(Sinv);
-  Eigen::MatrixXd K = M_a * Sinv.selfadjointView<Eigen::Upper>();
+  Eigen::MatrixXd K = M_a * Sinv.selfadjointView<Eigen::Upper>(); // kernel 卡尔曼增益
   // Eigen::MatrixXd K = M_a * S.inverse();
 
-  // Update Covariance
-  state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();
-  state->_Cov = state->_Cov.selfadjointView<Eigen::Upper>();
+  // Update Covariance // kernel 协方差更新
+  state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();  // P' = P - K * (H * P^T) 其中 P = P^T
+  state->_Cov = state->_Cov.selfadjointView<Eigen::Upper>(); // code Eigen对称矩阵操作，这是个什么用法？
   // Cov -= K * M_a.transpose();
   // Cov = 0.5*(Cov+Cov.transpose());
 
@@ -181,9 +207,10 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
     std::exit(EXIT_FAILURE);
   }
 
-  // Calculate our delta and update all our active states
-  Eigen::VectorXd dx = K * res;
+  // Calculate our delta and update all our active states // kernel 更新状态量（残差状态量），即MSCKF
+  Eigen::VectorXd dx = K * res; 
   for (size_t i = 0; i < state->_variables.size(); i++) {
+    // 状态量更新(广义加法)
     state->_variables.at(i)->update(dx.block(state->_variables.at(i)->id(), 0, state->_variables.at(i)->size(), 1));
   }
 

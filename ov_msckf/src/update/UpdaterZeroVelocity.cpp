@@ -207,7 +207,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   }
 
   // Compress the system (we should be over determined)
-  UpdaterHelper::measurement_compress_inplace(H, res); // 左零空间投影，排除特征点量信息，H与res减去一个特征量的维度（3维）
+  UpdaterHelper::measurement_compress_inplace(H, res); // todo 左零空间投影，排除什么信息？ 做下打印吧
   if (H.rows() < 1) {
     return false;
   }
@@ -221,7 +221,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // todo 这里是如何计算bias的协方差的？
   // 雅可比矩阵为单位矩阵
   // Next propagate the biases forward in time
-  // NOTE: G*Qd*G^t = dt*Qd*dt = dt*(1/dt*Qc)*dt = dt*Qc // note 
+  // NOTE: G*Qd*G^t = dt*Qd*dt = dt*(1/dt*Qc)*dt = dt*Qc // todo Qd是离散 Qc是连续？
   Eigen::MatrixXd Q_bias = Eigen::MatrixXd::Identity(6, 6);
   Q_bias.block(0, 0, 3, 3) *= dt_summed * _noises.sigma_wb_2; // imu测量累积时间 * 角度随机游走协方差
   Q_bias.block(3, 3, 3, 3) *= dt_summed * _noises.sigma_ab_2;
@@ -270,10 +270,11 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     int num_features = 0;
     double disp_avg = 0.0;
     double disp_var = 0.0;
+    // 出参：计算视差均值、方差、个数
     FeatureHelper::compute_disparity(_db, time0_cam, time1_cam, disp_avg, disp_var, num_features);
 
     // Check if this disparity is enough to be classified as moving
-    disparity_passed = (disp_avg < _zupt_max_disparity && num_features > 20);
+    disparity_passed = (disp_avg < _zupt_max_disparity && num_features > 20); // note 基于视差的zupt检测阈值
     if (disparity_passed) {
       PRINT_INFO(CYAN "[ZUPT]: passed disparity (%.3f < %.3f, %d features)\n" RESET, disp_avg, _zupt_max_disparity, (int)num_features);
     } 
@@ -281,10 +282,13 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
       PRINT_DEBUG(YELLOW "[ZUPT]: failed disparity (%.3f > %.3f, %d features)\n" RESET, disp_avg, _zupt_max_disparity, (int)num_features);
     }
   }
+  // --- end 基于视差的zupt检测
 
   // Check if we are currently zero velocity
   // We need to pass the chi2 and not be above our velocity threshold
-  if (!disparity_passed && (chi2 > _options.chi2_multipler * chi2_check || state->_imu->vel().norm() > _zupt_max_velocity)) {
+  if (!disparity_passed && 
+      (chi2 > _options.chi2_multipler * chi2_check || state->_imu->vel().norm() > _zupt_max_velocity)) 
+  {
     last_zupt_state_timestamp = 0.0;
     last_zupt_count = 0;
     PRINT_DEBUG(YELLOW "[ZUPT]: rejected |v_IinG| = %.3f (chi2 %.3f > %.3f)\n" RESET, state->_imu->vel().norm(), chi2,
@@ -294,35 +298,62 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   PRINT_INFO(CYAN "[ZUPT]: accepted |v_IinG| = %.3f (chi2 %.3f < %.3f)\n" RESET, state->_imu->vel().norm(), chi2,
              _options.chi2_multipler * chi2_check);
 
+  /*
+    todo 这段注释在说啥？
+    gpt 如果已经进行过至少两次ZUPT，那么就不会在这个时间戳进行克隆操作，而是进行零速度更新。
+    gpt 这是因为在第二次及以后的ZUPT中，不需要克隆状态，而是直接进行更新。
+    gpt 因此，这段代码的目的是在进行了至少两次ZUPT后，清理对应时间戳的测量数据。
+  */
   // Do our update, only do this update if we have previously detected
   // If we have succeeded, then we should remove the current timestamp feature tracks
   // This is because we will not clone at this timestep and instead do our zero velocity update
   // NOTE: We want to keep the tracks from the second time we have called the zv-upt since this won't have a clone
   // NOTE: All future times after the second call to this function will also *not* have a clone, so we can remove those
   if (last_zupt_count >= 2) {
-    _db->cleanup_measurements_exact(last_zupt_state_timestamp);
+    _db->cleanup_measurements_exact(last_zupt_state_timestamp); // 清理last_zupt_state_timestamp时间戳的测量数据
   }
 
+  /* 
+    gpt 零速度更新是一种用于惯性导航系统（INS）的技术，它利用了当载体静止时，速度为零的事实来校正IMU（惯性测量单元）的误差。
+    gpt 代码的主要逻辑分为两部分：
+    gpt   1. 如果explicitly_enforce_zero_motion标志为false，则执行正常的状态更新。这包括使用IMU测量直接更新状态，以及将偏差（bias）向前传播。
+    gpt   2. 如果explicitly_enforce_zero_motion标志为true，则执行一个更为严格的更新。这涉及到将状态向前传播，并显式地将方向（orientation）、位置（position）和速度（velocity）设置为零。
+
+    gpt 在第二部分中，代码首先使用propagate_and_clone方法将状态向前传播到新的时间戳。
+    gpt 然后，它创建了一个更新系统，包括残差（residuals）、雅可比矩阵（Jacobian）和噪声矩阵（noise matrix）。
+    gpt 残差是基于两个时间戳的IMU克隆状态之间的方向、位置和速度差异计算的。雅可比矩阵和噪声矩阵用于在扩展卡尔曼滤波（EKF）更新步骤中定义状态更新的线性化模型和测量噪声。
+    gpt 最后，使用EKFUpdate方法更新状态，并通过marginalize方法和erase操作移除旧的克隆状态，以保持状态向量的大小不变。
+  */
   // Else we are good, update the system
   // 1) update with our IMU measurements directly
   // 2) propagate and then explicitly say that our ori, pos, and vel should be zero
   if (!explicitly_enforce_zero_motion) {
 
     // Next propagate the biases forward in time
-    // NOTE: G*Qd*G^t = dt*Qd*dt = dt*Qc
-    if (model_time_varying_bias) {
+    // NOTE: G*Qd*G^t = dt*Qd*dt = dt*Qc // todo 这是什么公式？
+    if (model_time_varying_bias) { // 考虑随时间变化的随机游走偏差,更新协方差
       Eigen::MatrixXd Phi_bias = Eigen::MatrixXd::Identity(6, 6);
       std::vector<std::shared_ptr<Type>> Phi_order;
-      Phi_order.push_back(state->_imu->bg());
+      Phi_order.push_back(state->_imu->bg()); // todo 这里bg、ba在该函数前段有修改吗？
       Phi_order.push_back(state->_imu->ba());
-      StateHelper::EKFPropagation(state, Phi_order, Phi_order, Phi_bias, Q_bias);
+      StateHelper::EKFPropagation(state, 
+                                  Phi_order, // order_NEW Contiguous variables that have evolved according to this state transition
+                                  Phi_order, // order_OLD Variable ordering used in the state transition
+                                  Phi_bias,  // Phi       State transition matrix (size order_NEW by size order_OLD) 状态转移矩阵
+                                  Q_bias);   // Q         Additive state propagation noise matrix (size order_NEW by size order_NEW)  
+      // tips 这里Phi_bias为单位矩阵，bias传播仅累加了Q_bias
     }
 
     // Finally move the state time forward
-    StateHelper::EKFUpdate(state, Hx_order, H, res, R);
+    StateHelper::EKFUpdate(state, 
+                           Hx_order, // 存放状态变量的指针
+                           H,        // H   压缩的
+                           res,      // res 压缩的
+                           R);       // R   压缩的
     state->_timestamp = timestamp;
 
-  } else {
+  } 
+  else {
 
     // Propagate the state forward in time
     double time0_cam = last_zupt_state_timestamp;

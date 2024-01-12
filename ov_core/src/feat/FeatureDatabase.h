@@ -132,6 +132,7 @@ public:
 
   /**
    * @brief This function will delete all feature measurements that are at the specified timestamp
+   * @param timestamp Time that we want to delete measurements at
    */
   void cleanup_measurements_exact(double timestamp);
 

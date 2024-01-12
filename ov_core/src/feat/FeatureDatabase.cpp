@@ -186,7 +186,7 @@ FeatureDatabase::features_containing(double timestamp, // 查找的时间戳
     // Boolean if it has the timestamp
     // Break out if we found a single timestamp that is equal to the specified time
     bool has_timestamp = false;
-    for (auto const &pair : (*it).second->timestamps) {
+    for (auto const &pair : (*it).second->timestamps) { // code 遍历map容器的键，即相机id
       has_timestamp = (std::find(pair.second.begin(), pair.second.end(), timestamp) != pair.second.end());
       if (has_timestamp) {
         break;
