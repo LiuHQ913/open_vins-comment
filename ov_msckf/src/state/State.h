@@ -82,7 +82,7 @@ public:
 
   /**
    * @brief Gyroscope and accelerometer intrinsic matrix (scale imperfection and axis misalignment)
-   *
+   *        imu内参模型，包括陀螺仪和加速度计的比例误差和轴向误差，基本是单位矩阵
    * If kalibr model, lower triangular of the matrix is used
    * If   rpng model, upper triangular of the matrix is used
    *

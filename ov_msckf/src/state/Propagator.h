@@ -98,13 +98,15 @@ public:
 
   /**
    * @brief Propagate state up to given timestamp and then clone
-   *
+   *        将状态传播到给定的时间戳，然后克隆
    * This will first collect all imu readings that occured between the
    * *current* state time and the new time we want the state to be at.
    * If we don't have any imu readings we will try to extrapolate into the future.
    * After propagating the mean and covariance using our dynamics,
    * We clone the current imu pose as a new clone in our state.
-   *
+   * 收集当前状态时间和给定时间之间发生的所有imu读数。
+   * 如果我们没有任何imu读数，我们将尝试向未来外推。
+   * 使用我们的动力学传播平均值和协方差后，我们将当前imu姿态克隆为状态中的新克隆。
    * @param state Pointer to state
    * @param timestamp Time to propagate to and clone at (CAM clock frame)
    */
@@ -238,12 +240,15 @@ protected:
    *
    * @param state Pointer to state
    * @param data_minus imu readings at beginning of interval
-   * @param data_plus imu readings at end of interval
+   * @param data_plus  imu readings at end of interval
    * @param F State-transition matrix over the interval
    * @param Qd Discrete-time noise covariance over the interval
    */
-  void predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
-                           Eigen::MatrixXd &F, Eigen::MatrixXd &Qd);
+  void predict_and_compute(std::shared_ptr<State> state, 
+                           const ov_core::ImuData &data_minus, 
+                           const ov_core::ImuData &data_plus,
+                           Eigen::MatrixXd &F, 
+                           Eigen::MatrixXd &Qd);
 
   /**
    * @brief Discrete imu mean propagation.
@@ -361,7 +366,10 @@ protected:
    * @param a_hat Linear acceleration with bias removed
    * @param Xi_sum All the needed integration components, including R_k, Xi_1, Xi_2, Jr, Xi_3, Xi_4 in order
    */
-  void compute_Xi_sum(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat, const Eigen::Vector3d &a_hat,
+  void compute_Xi_sum(std::shared_ptr<State> state, 
+                      double dt, 
+                      const Eigen::Vector3d &w_hat, 
+                      const Eigen::Vector3d &a_hat,
                       Eigen::Matrix<double, 3, 18> &Xi_sum);
 
   /**

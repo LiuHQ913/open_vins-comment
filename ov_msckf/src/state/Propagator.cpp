@@ -34,13 +34,16 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
 
   // If the difference between the current update time and state is zero
   // We should crash, as this means we would have two clones at the same time!!!!
-  if (state->_timestamp == timestamp) {
+  /*
+    如果当前更新时间和状态之间的差值为零，我们应该崩溃，因为这意味着我们将在同一时间有两个克隆！
+  */
+  if (state->_timestamp == timestamp) { // todo 会存在这种情况吗？
     PRINT_ERROR(RED "Propagator::propagate_and_clone(): Propagation called again at same timestep at last update timestep!!!!\n" RESET);
     std::exit(EXIT_FAILURE);
   }
 
   // We should crash if we are trying to propagate backwards
-  if (state->_timestamp > timestamp) {
+  if (state->_timestamp > timestamp) { // todo 会存在这种情况吗？
     PRINT_ERROR(RED "Propagator::propagate_and_clone(): Propagation called trying to propagate backwards in time!!!!\n" RESET);
     PRINT_ERROR(RED "Propagator::propagate_and_clone(): desired propagation = %.4f\n" RESET, (timestamp - state->_timestamp));
     std::exit(EXIT_FAILURE);
@@ -51,7 +54,7 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
   //===================================================================================
 
   // Set the last time offset value if we have just started the system up
-  if (!have_last_prop_time_offset) {
+  if (!have_last_prop_time_offset) { // 默认或者初始为false，是否上一次传播时间偏移
     last_prop_time_offset = state->_calib_dt_CAMtoIMU->value()(0);
     have_last_prop_time_offset = true;
   }
@@ -59,22 +62,23 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
   // Get what our IMU-camera offset should be (t_imu = t_cam + calib_dt)
   double t_off_new = state->_calib_dt_CAMtoIMU->value()(0);
 
+  // note 时间延迟用法
   // First lets construct an IMU vector of measurements we need
   double time0 = state->_timestamp + last_prop_time_offset;
   double time1 = timestamp + t_off_new;
   std::vector<ov_core::ImuData> prop_data;
   {
-    std::lock_guard<std::mutex> lck(imu_data_mtx);
-    prop_data = Propagator::select_imu_readings(imu_data, time0, time1);
+    std::lock_guard<std::mutex> lck(imu_data_mtx); // todo 什么数据，什么情况，如何判断是否上锁？
+    prop_data = Propagator::select_imu_readings(imu_data, time0, time1); // 获取相应的imu测量
   }
 
   // We are going to sum up all the state transition matrices, so we can do a single large multiplication at the end
   // Phi_summed = Phi_i*Phi_summed
-  // Q_summed = Phi_i*Q_summed*Phi_i^T + Q_i
+  //   Q_summed = Phi_i*Q_summed*Phi_i^T + Q_i
   // After summing we can multiple the total phi to get the updated covariance
   // We will then add the noise to the IMU portion of the state
-  Eigen::MatrixXd Phi_summed = Eigen::MatrixXd::Identity(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15);
-  Eigen::MatrixXd Qd_summed = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15);
+  Eigen::MatrixXd Phi_summed = Eigen::MatrixXd::Identity(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15); // 雅可比
+  Eigen::MatrixXd Qd_summed  = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15);     // 协方差
   double dt_summed = 0;
 
   // Loop through all IMU messages, and use them to move the state forward in time
@@ -401,10 +405,14 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
   return prop_data;
 }
 
-void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
-                                     Eigen::MatrixXd &F, Eigen::MatrixXd &Qd) {
+void Propagator::predict_and_compute(std::shared_ptr<State> state, 
+                                     const ov_core::ImuData &data_minus, // 起始数据
+                                     const ov_core::ImuData &data_plus,  // 结束数据
+                                     Eigen::MatrixXd &F,   // 状态转移矩阵 
+                                     Eigen::MatrixXd &Qd)  // 离散噪声协方差
+{
 
-  // Time elapsed over interval
+  // Time elapsed over interval 间隔内经过的时间
   double dt = data_plus.timestamp - data_minus.timestamp;
   // assert(data_plus.timestamp>data_minus.timestamp);
 
@@ -414,11 +422,13 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value());
 
   // Corrected imu acc measurements with our current biases
+  // note 通过当前bias修正imu加速度测量值
   Eigen::Vector3d a_hat1 = data_minus.am - state->_imu->bias_a();
-  Eigen::Vector3d a_hat2 = data_plus.am - state->_imu->bias_a();
-  Eigen::Vector3d a_hat_avg = .5 * (a_hat1 + a_hat2);
+  Eigen::Vector3d a_hat2 = data_plus.am  - state->_imu->bias_a();
+  Eigen::Vector3d a_hat_avg = .5 * (a_hat1 + a_hat2); // todo 中值bias，理论有说明？
 
   // Convert "raw" imu to its corrected frame using the IMU intrinsics
+  // 使用imu内参转换“原始”imu数据到其修正坐标系
   Eigen::Vector3d a_uncorrected = a_hat_avg;
   Eigen::Matrix3d R_ACCtoIMU = state->_calib_imu_ACCtoIMU->Rot();
   a_hat1 = R_ACCtoIMU * Da * a_hat1;
@@ -427,7 +437,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // Corrected imu gyro measurements with our current biases and gravity sensitivity
   Eigen::Vector3d w_hat1 = data_minus.wm - state->_imu->bias_g() - Tg * a_hat1;
-  Eigen::Vector3d w_hat2 = data_plus.wm - state->_imu->bias_g() - Tg * a_hat2;
+  Eigen::Vector3d w_hat2 = data_plus.wm  - state->_imu->bias_g() - Tg * a_hat2;
   Eigen::Vector3d w_hat_avg = .5 * (w_hat1 + w_hat2);
 
   // Convert "raw" imu to its corrected frame using the IMU intrinsics
@@ -438,26 +448,26 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   w_hat_avg = R_GYROtoIMU * Dw * w_hat_avg;
 
   // Pre-compute some analytical values for the mean and covariance integration
-  Eigen::Matrix<double, 3, 18> Xi_sum = Eigen::Matrix<double, 3, 18>::Zero(3, 18);
+  // 预计算一些均值和协方差积分的解析值
+  Eigen::Matrix<double, 3, 18> Xi_sum = Eigen::Matrix<double, 3, 18>::Zero(3, 18); // 状态量 3x18
   if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4 ||
-      state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) {
+      state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) { // todo 积分方法，RK4不理解啊，还要学！解析法又是啥？
     compute_Xi_sum(state, dt, w_hat_avg, a_hat_avg, Xi_sum);
-  }
+  } // todo flag 阅读文档https://docs.openvins.com/propagation_discrete.html及pdf
 
   // Compute the new state mean value
   Eigen::Vector4d new_q;
   Eigen::Vector3d new_v, new_p;
-  if (state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) {
+  if (state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) 
     predict_mean_analytic(state, dt, w_hat_avg, a_hat_avg, new_q, new_v, new_p, Xi_sum);
-  } else if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4) {
+  else if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4) // 常用(默认)使用RK4
     predict_mean_rk4(state, dt, w_hat1, a_hat1, w_hat2, a_hat2, new_q, new_v, new_p);
-  } else {
+  else 
     predict_mean_discrete(state, dt, w_hat_avg, a_hat_avg, new_q, new_v, new_p);
-  }
 
   // Allocate state transition and continuous-time noise Jacobian
-  F = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15);
-  Eigen::MatrixXd G = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, 12);
+  F = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15); // F为状态转移矩阵
+  Eigen::MatrixXd G = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, 12); // 噪声状态转移矩阵
   if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4 ||
       state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) {
     compute_F_and_G_analytic(state, dt, w_hat_avg, a_hat_avg, w_uncorrected, a_uncorrected, new_q, new_v, new_p, Xi_sum, F, G);
@@ -594,8 +604,11 @@ void Propagator::predict_mean_rk4(std::shared_ptr<State> state, double dt, const
   new_v = v_0 + (1.0 / 6.0) * k1_v + (1.0 / 3.0) * k2_v + (1.0 / 3.0) * k3_v + (1.0 / 6.0) * k4_v;
 }
 
-void Propagator::compute_Xi_sum(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat, const Eigen::Vector3d &a_hat,
-                                Eigen::Matrix<double, 3, 18> &Xi_sum) {
+void Propagcompute_Xi_sum(std::shared_ptr<State> state, 
+                          double dt, 
+                          const Eigen::Vector3d &w_hat, 
+                          const Eigen::Vector3d &a_hat,
+                          Eigen::Matrix<double, 3, 18> &Xi_sum) {
 
   // Decompose our angular velocity into a direction and amount
   double w_norm = w_hat.norm();
@@ -621,7 +634,7 @@ void Propagator::compute_Xi_sum(std::shared_ptr<State> state, double dt, const E
 
   // Integration components will be used later
   Eigen::Matrix3d R_ktok1, Xi_1, Xi_2, Jr_ktok1, Xi_3, Xi_4;
-  R_ktok1 = ov_core::exp_so3(-w_hat * dt);
+  R_ktok1  = ov_core::exp_so3(-w_hat * dt);
   Jr_ktok1 = ov_core::Jr_so3(-w_hat * dt);
 
   // Now begin the integration of each component

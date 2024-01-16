@@ -317,7 +317,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     gpt 零速度更新是一种用于惯性导航系统（INS）的技术，它利用了当载体静止时，速度为零的事实来校正IMU（惯性测量单元）的误差。
     gpt 代码的主要逻辑分为两部分：
     gpt   1. 如果explicitly_enforce_zero_motion标志为false，则执行正常的状态更新。这包括使用IMU测量直接更新状态，以及将偏差（bias）向前传播。
-    gpt   2. 如果explicitly_enforce_zero_motion标志为true，则执行一个更为严格的更新。这涉及到将状态向前传播，并显式地将方向（orientation）、位置（position）和速度（velocity）设置为零。
+    gpt   2. 如果explicitly_enforce_zero_motion标志为true， 则执行一个更为严格的更新。这涉及到将状态向前传播，并显式地将方向（orientation）、位置（position）和速度（velocity）设置为零。
 
     gpt 在第二部分中，代码首先使用propagate_and_clone方法将状态向前传播到新的时间戳。
     gpt 然后，它创建了一个更新系统，包括残差（residuals）、雅可比矩阵（Jacobian）和噪声矩阵（noise matrix）。
@@ -336,6 +336,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
       std::vector<std::shared_ptr<Type>> Phi_order;
       Phi_order.push_back(state->_imu->bg()); // todo 这里bg、ba在该函数前段有修改吗？
       Phi_order.push_back(state->_imu->ba());
+      // kernel 传播(相关)状态变量协方差矩阵
       StateHelper::EKFPropagation(state, 
                                   Phi_order, // order_NEW Contiguous variables that have evolved according to this state transition
                                   Phi_order, // order_OLD Variable ordering used in the state transition
@@ -345,6 +346,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     }
 
     // Finally move the state time forward
+    // kernel EKF更新卡尔曼增益，协方差矩阵，状态量（残差状态量）
     StateHelper::EKFUpdate(state, 
                            Hx_order, // 存放状态变量的指针
                            H,        // H   压缩的
@@ -353,7 +355,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     state->_timestamp = timestamp;
 
   } 
-  else {
+  else { // propagate and then explicitly say that our ori, pos, and vel should be zero
 
     // Propagate the state forward in time
     double time0_cam = last_zupt_state_timestamp;
