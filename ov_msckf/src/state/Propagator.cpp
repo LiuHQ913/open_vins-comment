@@ -604,11 +604,12 @@ void Propagator::predict_mean_rk4(std::shared_ptr<State> state, double dt, const
   new_v = v_0 + (1.0 / 6.0) * k1_v + (1.0 / 3.0) * k2_v + (1.0 / 3.0) * k3_v + (1.0 / 6.0) * k4_v;
 }
 
-void Propagcompute_Xi_sum(std::shared_ptr<State> state, 
-                          double dt, 
-                          const Eigen::Vector3d &w_hat, 
-                          const Eigen::Vector3d &a_hat,
-                          Eigen::Matrix<double, 3, 18> &Xi_sum) {
+void compute_Xi_sum(std::shared_ptr<State> state, 
+                    double dt, 
+                    const Eigen::Vector3d &w_hat, 
+                    const Eigen::Vector3d &a_hat,
+                    Eigen::Matrix<double, 3, 18> &Xi_sum) 
+{
 
   // Decompose our angular velocity into a direction and amount
   double w_norm = w_hat.norm();
