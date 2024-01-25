@@ -114,10 +114,11 @@ public:
     return Clone;
   }
 
+  // gpt 这个函数的主要目的是检查输入的check是否是某个子变量
   std::shared_ptr<Type> check_if_subvariable(const std::shared_ptr<Type> check) override {
-    if (check == _pose) {
+    if (check == _pose) { // PoseJPL
       return _pose;
-    } else if (check == _pose->check_if_subvariable(check)) {
+    } else if (check == _pose->check_if_subvariable(check)) { // 检查是否是PoseJPL的子变量（q、p）
       return _pose->check_if_subvariable(check);
     } else if (check == _v) {
       return _v;
@@ -184,8 +185,8 @@ public:
   std::shared_ptr<Vec> ba() { return _ba; }
 
 protected:
-  /// Pose subvariable
-  std::shared_ptr<PoseJPL> _pose;
+  /// Pose subvariable // todo 什么坐标系？
+  std::shared_ptr<PoseJPL> _pose; 
 
   /// Velocity subvariable
   std::shared_ptr<Vec> _v;

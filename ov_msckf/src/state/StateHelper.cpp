@@ -37,9 +37,9 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state,
                                  const std::vector<std::shared_ptr<Type>> &order_NEW,
                                  const std::vector<std::shared_ptr<Type>> &order_OLD, 
                                  const Eigen::MatrixXd &Phi,
-                                 const Eigen::MatrixXd &Q) 
+                                 const Eigen::MatrixXd &Q) // 传入的、计算好的协方差矩阵，但这是两帧之间的协方差矩阵。
 {
-  // --- check 模块
+#pragma region // --- check 模块  
   // We need at least one old and new variable
   if (order_NEW.empty() || order_OLD.empty()) {
     PRINT_ERROR(RED "StateHelper::EKFPropagation() - Called with empty variable arrays!\n" RESET);
@@ -69,14 +69,14 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state,
   assert(size_order_OLD == Phi.cols());
   assert(size_order_NEW == Q.cols());
   assert(size_order_NEW == Q.rows());
-  // --- end check
+#pragma endregion // --- endcheck 模块
 
   // Get the location in small phi for each measuring variable
   int current_it = 0;
   std::vector<int> Phi_id;
-  for (const auto &var : order_OLD) { // 重排id
+  for (const auto &var : order_OLD) { // 获取每个测量变量在phi中的位置
     Phi_id.push_back(current_it);
-    current_it += var->size();
+    current_it += var->size(); // 传入old的id
   }
 
   // 从Pk|k转换到Pk+1|k
@@ -94,17 +94,18 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state,
           [a3]           [0 a3]
           [a4]           [0 a4]
         */
-        state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size())  // 获取[0，变量id]矩阵（协方差），大小：状态量协方差所有行数 x 变量维度数（如：nx3）
-          * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose(); // 获取[0, 重排id]
+        state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size())  // 获取[0，变量id]矩阵(协方差)，大小：状态量协方差所有行数 x 变量维度数（如：nx3）
+          * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose(); // 获取[0, 传入old的id] (雅可比)
         // 注： 当状态转移矩阵为单位矩阵时，此操作为空。即 Cov_PhiT = state->_Cov
   }
 
   // Get Phi_NEW*Covariance*Phi_NEW^t + Q
   // todo 做下打印，看看Phi_Cov_PhiT矩阵是什么？
-  Eigen::MatrixXd Phi_Cov_PhiT = Q.selfadjointView<Eigen::Upper>();
+  Eigen::MatrixXd Phi_Cov_PhiT = Q.selfadjointView<Eigen::Upper>(); // code 自适应矩阵，只需要存储和处理一半的元素
   for (size_t i = 0; i < order_OLD.size(); i++) {
     // 如：状态转移矩阵[6，3] * 协防差矩阵[3, 6] + Q
     std::shared_ptr<Type> var = order_OLD.at(i);
+    // 计算 G Q G^T 的另一半
     Phi_Cov_PhiT.noalias() += Phi.block(0, Phi_id[i], Phi.rows(), var->size())          // 获取[0, 重排id]
                                 * Cov_PhiT.block(var->id(), 0, var->size(), Phi.rows());// 获取[变量id, 0]矩阵, 大小：变量维度数 x 状态转移矩阵行数（如：3x6）
     // 注：根据var->id()找到相应的方差矩阵，进行传播 Phi_NEW*Covariance*Phi_NEW^t + Q
@@ -115,7 +116,7 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state,
   int phi_size = Phi.rows();
   int total_size = state->_Cov.rows();
   // kernel 维护状态变量协方差矩阵
-  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose(); // todo 非对角矩阵块怎么是这个样子呢？
+  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose(); // todo 非对角矩阵块怎么是这个样子呢？ 怎么是GQG的一半？
   state->_Cov.block(0, start_id, total_size, phi_size) = Cov_PhiT;
   state->_Cov.block(start_id, start_id, phi_size, phi_size) = Phi_Cov_PhiT;
 
@@ -366,14 +367,18 @@ void StateHelper::marginalize(std::shared_ptr<State> state, std::shared_ptr<Type
   state->_variables = remaining_variables;
 }
 
-std::shared_ptr<Type> StateHelper::clone(std::shared_ptr<State> state, std::shared_ptr<Type> variable_to_clone) {
+std::shared_ptr<Type> StateHelper::clone(std::shared_ptr<State> state,            // state
+                                         std::shared_ptr<Type> variable_to_clone) // state->_imu->pose()
+{
 
   // Get total size of new cloned variables, and the old covariance size
   int total_size = variable_to_clone->size();
-  int old_size = (int)state->_Cov.rows();
-  int new_loc = (int)state->_Cov.rows();
+  int old_size   = (int)state->_Cov.rows();
+  int new_loc    = (int)state->_Cov.rows();
 
   // Resize both our covariance to the new size
+  // code conservativeResizeLike函数会改变矩阵的大小，但是会保留原来矩阵中的元素
+  //      如果新的大小比原来的大，那么新添加的元素会被初始化为零；如果新的大小比原来的小，那么超出部分的元素会被丢弃。
   state->_Cov.conservativeResizeLike(Eigen::MatrixXd::Zero(old_size + total_size, old_size + total_size));
 
   // What is the new state, and variable we inserted
@@ -385,7 +390,7 @@ std::shared_ptr<Type> StateHelper::clone(std::shared_ptr<State> state, std::shar
 
     // Skip this if it is not the same
     // First check if the top level variable is the same, then check the sub-variables
-    std::shared_ptr<Type> type_check = state->_variables.at(k)->check_if_subvariable(variable_to_clone);
+    std::shared_ptr<Type> type_check = state->_variables.at(k)->check_if_subvariable(variable_to_clone); // todo 这行除了声明，还有其他作用吗？检测函数没有意义呢
     if (state->_variables.at(k) == variable_to_clone) {
       type_check = state->_variables.at(k);
     } else if (type_check != variable_to_clone) {
@@ -414,8 +419,8 @@ std::shared_ptr<Type> StateHelper::clone(std::shared_ptr<State> state, std::shar
   }
 
   // Add to variable list and return
-  state->_variables.push_back(new_clone);
-  return new_clone;
+  state->_variables.push_back(new_clone); // 将k变量添加到state->_variables中
+  return new_clone; // 返回k变量
 }
 
 bool StateHelper::initialize(std::shared_ptr<State> state, std::shared_ptr<Type> new_variable,
@@ -604,7 +609,9 @@ void StateHelper::initialize_invertible(std::shared_ptr<State> state, std::share
   // PRINT_DEBUG(ss.str().c_str());
 }
 
-void StateHelper::augment_clone(std::shared_ptr<State> state, Eigen::Matrix<double, 3, 1> last_w) {
+void StateHelper::augment_clone(std::shared_ptr<State> state, 
+                                Eigen::Matrix<double, 3, 1> last_w) 
+{
 
   // We can't insert a clone that occured at the same timestamp!
   if (state->_clones_IMU.find(state->_timestamp) != state->_clones_IMU.end()) {
@@ -614,9 +621,15 @@ void StateHelper::augment_clone(std::shared_ptr<State> state, Eigen::Matrix<doub
 
   // Call on our cloner and add it to our vector of types
   // NOTE: this will clone the clone pose to the END of the covariance...
+  /*
+    1. 扩展协方差矩阵
+    2. 将克隆的状态量(state->_imu->pose())添加到state->_variables中
+    3. 返回克隆的状态量
+  */
   std::shared_ptr<Type> posetemp = StateHelper::clone(state, state->_imu->pose());
 
   // Cast to a JPL pose type, check if valid
+  // code 基类指针转换为派生类指针
   std::shared_ptr<PoseJPL> pose = std::dynamic_pointer_cast<PoseJPL>(posetemp);
   if (pose == nullptr) {
     PRINT_ERROR(RED "INVALID OBJECT RETURNED FROM STATEHELPER CLONE, EXITING!#!@#!@#\n" RESET);
@@ -624,18 +637,20 @@ void StateHelper::augment_clone(std::shared_ptr<State> state, Eigen::Matrix<doub
   }
 
   // Append the new clone to our clone vector
-  state->_clones_IMU[state->_timestamp] = pose;
+  state->_clones_IMU[state->_timestamp] = pose; // 根据时间戳记录克隆的imu位姿
 
   // If we are doing time calibration, then our clones are a function of the time offset
   // Logic is based on Mingyang Li and Anastasios I. Mourikis paper:
   // http://journals.sagepub.com/doi/pdf/10.1177/0278364913515286
   if (state->_options.do_calib_camera_timeoffset) {
-    // Jacobian to augment by
+    // Jacobian to augment by （ref. 函数描述）
     Eigen::Matrix<double, 6, 1> dnc_dt = Eigen::MatrixXd::Zero(6, 1);
     dnc_dt.block(0, 0, 3, 1) = last_w;
-    dnc_dt.block(3, 0, 3, 1) = state->_imu->vel();
+    dnc_dt.block(3, 0, 3, 1) = state->_imu->vel(); 
     // Augment covariance with time offset Jacobian
     // TODO: replace this with a call to the EKFPropagate function instead....
+    // 更新克隆的imu位姿相关的协防差矩阵块(累计)。
+    // lhq 这是还是GQG的一半
     state->_Cov.block(0, pose->id(), state->_Cov.rows(), 6) +=
         state->_Cov.block(0, state->_calib_dt_CAMtoIMU->id(), state->_Cov.rows(), 1) * dnc_dt.transpose();
     state->_Cov.block(pose->id(), 0, 6, state->_Cov.rows()) +=

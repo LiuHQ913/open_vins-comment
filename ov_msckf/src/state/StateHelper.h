@@ -70,7 +70,7 @@ public:
    * @param state Pointer to state
    * @param order_NEW Contiguous variables that have evolved according to this state transition
    * @param order_OLD Variable ordering used in the state transition
-   * @param Phi State transition matrix (size order_NEW by size order_OLD)
+   * @param Phi Variable ordering used in the state transition
    * @param Q Additive state propagation noise matrix (size order_NEW by size order_NEW)
    */
   static void EKFPropagation(std::shared_ptr<State> state, 
@@ -191,14 +191,14 @@ public:
 
   /**
    * @brief Augment the state with a stochastic copy of the current IMU pose
-   *
+   *        // todo 这里的clone表示什么意思？
    * After propagation, normally we augment the state with an new clone that is at the new update timestep.
    * This augmentation clones the IMU pose and adds it to our state's clone map.
    * If we are doing time offset calibration we also make our cloning a function of the time offset.
    * Time offset logic is based on Li and Mourikis @cite Li2014IJRR.
    *
-   * We can write the current clone at the true imu base clock time as the
-   * follow: \f{align*}{
+   * We can write the current clone at the true imu base clock time as the follow:
+   * \f{align*}{
    * {}^{I_{t+t_d}}_G\bar{q} &= \begin{bmatrix}\frac{1}{2} {}^{I_{t+\hat{t}_d}}\boldsymbol\omega \tilde{t}_d \\
    * 1\end{bmatrix}\otimes{}^{I_{t+\hat{t}_d}}_G\bar{q} \\
    * {}^G\mathbf{p}_{I_{t+t_d}} &= {}^G\mathbf{p}_{I_{t+\hat{t}_d}} + {}^G\mathbf{v}_{I_{t+\hat{t}_d}}\tilde{t}_d
@@ -211,7 +211,7 @@ public:
    * \frac{\partial {}^{I_{t+t_d}}_G\tilde{\boldsymbol\theta}}{\partial \tilde{t}_d} &= {}^{I_{t+\hat{t}_d}}\boldsymbol\omega \\
    * \frac{\partial {}^G\tilde{\mathbf{p}}_{I_{t+t_d}}}{\partial \tilde{t}_d} &= {}^G\mathbf{v}_{I_{t+\hat{t}_d}}
    * \f}
-   *
+   *  // note 对于时间偏移量的雅可比矩阵
    * @param state Pointer to state
    * @param last_w The estimated angular velocity at cloning time (used to estimate imu-cam time offset)
    */

@@ -399,7 +399,7 @@ protected:
 
   /**
    * @brief Analytically compute state transition matrix F and noise Jacobian G based on ACI^2
-   *
+   *        与官方文档基本一致，有2处不同，还需研究
    * This function is for analytical integration of the linearized error-state.
    * This contains our state transition matrix and noise Jacobians.
    * If you have other state variables besides the IMU that evolve you would add them here.
@@ -410,6 +410,7 @@ protected:
    * @param w_hat Angular velocity with bias removed
    * @param a_hat Linear acceleration with bias removed
    * @param w_uncorrected Angular velocity in acc frame with bias and gravity sensitivity removed
+   * @param a_uncorrected Linear acceleration in gyro frame with bias removed
    * @param new_q The resulting new orientation after integration
    * @param new_v The resulting new velocity after integration
    * @param new_p The resulting new position after integration
@@ -417,9 +418,16 @@ protected:
    * @param F State transition matrix
    * @param G Noise Jacobian
    */
-  void compute_F_and_G_analytic(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat, const Eigen::Vector3d &a_hat,
-                                const Eigen::Vector3d &w_uncorrected, const Eigen::Vector3d &a_uncorrected, const Eigen::Vector4d &new_q,
-                                const Eigen::Vector3d &new_v, const Eigen::Vector3d &new_p, const Eigen::Matrix<double, 3, 18> &Xi_sum,
+  void compute_F_and_G_analytic(std::shared_ptr<State> state, 
+                                double dt, 
+                                const Eigen::Vector3d &w_hat, 
+                                const Eigen::Vector3d &a_hat,
+                                const Eigen::Vector3d &w_uncorrected, 
+                                const Eigen::Vector3d &a_uncorrected, 
+                                const Eigen::Vector4d &new_q,
+                                const Eigen::Vector3d &new_v, 
+                                const Eigen::Vector3d &new_p, 
+                                const Eigen::Matrix<double, 3, 18> &Xi_sum,
                                 Eigen::MatrixXd &F, Eigen::MatrixXd &G);
 
   /**

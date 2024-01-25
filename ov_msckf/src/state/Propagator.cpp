@@ -88,6 +88,15 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
 
       // Get the next state Jacobian and noise Jacobian for this IMU reading
       Eigen::MatrixXd F, Qdi;
+      /*
+        1. 处理imu数据（去除bias、取中值、根据imu内参与校正模型修正） // todo 有疑问？
+        2. 计算预测均值和协方差
+          2.1 计算中间组件
+          2.2 传播均值（rk4）
+          2.3 传播雅可比（F、G）
+          2.4 传播噪声协方矩阵（G*Q*G） // todo 有疑问？
+          2.5 维护(IMU)预测均值（state、fej）
+      */
       predict_and_compute(state, prop_data.at(i), prop_data.at(i + 1), F, Qdi);
 
       // Next we should propagate our IMU covariance
@@ -96,10 +105,10 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       // NOTE: Here we are summing the state transition F so we can do a single mutiplication later
       // NOTE: Phi_summed = Phi_i*Phi_summed
       // NOTE: Q_summed = Phi_i*Q_summed*Phi_i^T + G*Q_i*G^T
-      Phi_summed = F * Phi_summed;
-      Qd_summed = F * Qd_summed * F.transpose() + Qdi;
-      Qd_summed = 0.5 * (Qd_summed + Qd_summed.transpose());
-      dt_summed += prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp;
+      Phi_summed = F * Phi_summed; // note 雅可比矩阵传播
+      Qd_summed  = F * Qd_summed * F.transpose() + Qdi; // note 协方差矩阵传播
+      Qd_summed  = 0.5 * (Qd_summed + Qd_summed.transpose());
+      dt_summed += prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp; // 累计时间
     }
   }
   assert(std::abs((time1 - time0) - dt_summed) < 1e-4);
@@ -107,18 +116,18 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
   // Last angular velocity (used for cloning when estimating time offset)
   // Remember to correct them before we store them
   Eigen::Vector3d last_a = Eigen::Vector3d::Zero();
-  Eigen::Vector3d last_w = Eigen::Vector3d::Zero();
+  Eigen::Vector3d last_w = Eigen::Vector3d::Zero(); // 应用点
   if (!prop_data.empty()) {
     Eigen::Matrix3d Dw = State::Dm(state->_options.imu_model, state->_calib_imu_dw->value());
     Eigen::Matrix3d Da = State::Dm(state->_options.imu_model, state->_calib_imu_da->value());
     Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value());
-    last_a = state->_calib_imu_ACCtoIMU->Rot() * Da * (prop_data.at(prop_data.size() - 1).am - state->_imu->bias_a());
+    last_a = state->_calib_imu_ACCtoIMU->Rot()  * Da * (prop_data.at(prop_data.size() - 1).am - state->_imu->bias_a());
     last_w = state->_calib_imu_GYROtoIMU->Rot() * Dw * (prop_data.at(prop_data.size() - 1).wm - state->_imu->bias_g() - Tg * last_a);
   }
 
   // Do the update to the covariance with our "summed" state transition and IMU noise addition...
-  std::vector<std::shared_ptr<Type>> Phi_order;
-  Phi_order.push_back(state->_imu);
+  std::vector<std::shared_ptr<Type>> Phi_order; // 基类容器
+  Phi_order.push_back(state->_imu); 
   if (state->_options.do_calib_imu_intrinsics) {
     Phi_order.push_back(state->_calib_imu_dw);
     Phi_order.push_back(state->_calib_imu_da);
@@ -131,13 +140,18 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       Phi_order.push_back(state->_calib_imu_ACCtoIMU);
     }
   }
-  StateHelper::EKFPropagation(state, Phi_order, Phi_order, Phi_summed, Qd_summed);
+  StateHelper::EKFPropagation(state, 
+                              Phi_order,  // order_NEW : Contiguous variables that have evolved according to this state transition
+                              Phi_order,  // order_OLD : Variable ordering used in the state transition
+                              Phi_summed, // phi       ：Variable ordering used in the state transition 上面计算的 雅可比矩阵
+                              Qd_summed); // Q         : Additive state propagation noise matrix 上面计算的
 
   // Set timestamp data
   state->_timestamp = timestamp;
   last_prop_time_offset = t_off_new;
 
   // Now perform stochastic cloning
+  // todo 这里的克隆是什么意思？
   StateHelper::augment_clone(state, last_w);
 }
 
@@ -425,6 +439,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state,
   // note 通过当前bias修正imu加速度测量值
   Eigen::Vector3d a_hat1 = data_minus.am - state->_imu->bias_a();
   Eigen::Vector3d a_hat2 = data_plus.am  - state->_imu->bias_a();
+  // note 这里的imu数据认为是常量（中值） // todo 这里的ACI是那个模型？
   Eigen::Vector3d a_hat_avg = .5 * (a_hat1 + a_hat2); // todo 中值bias，理论有说明？
 
   // Convert "raw" imu to its corrected frame using the IMU intrinsics
@@ -436,7 +451,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state,
   a_hat_avg = R_ACCtoIMU * Da * a_hat_avg;
 
   // Corrected imu gyro measurements with our current biases and gravity sensitivity
-  Eigen::Vector3d w_hat1 = data_minus.wm - state->_imu->bias_g() - Tg * a_hat1;
+  Eigen::Vector3d w_hat1 = data_minus.wm - state->_imu->bias_g() - Tg * a_hat1; // todo 角速度修正与加速度有什么关系？
   Eigen::Vector3d w_hat2 = data_plus.wm  - state->_imu->bias_g() - Tg * a_hat2;
   Eigen::Vector3d w_hat_avg = .5 * (w_hat1 + w_hat2);
 
@@ -452,16 +467,17 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state,
   Eigen::Matrix<double, 3, 18> Xi_sum = Eigen::Matrix<double, 3, 18>::Zero(3, 18); // 状态量 3x18
   if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4 ||
       state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) { // todo 积分方法，RK4不理解啊，还要学！解析法又是啥？
-    compute_Xi_sum(state, dt, w_hat_avg, a_hat_avg, Xi_sum);
-  } // todo flag 阅读文档https://docs.openvins.com/propagation_discrete.html及pdf
+    compute_Xi_sum(state, dt, w_hat_avg, a_hat_avg, Xi_sum); // 计算中间件
+  } // 参考文档：https://docs.openvins.com/propagation_analytical.html
 
+  // 传播：均值
   // Compute the new state mean value
   Eigen::Vector4d new_q;
   Eigen::Vector3d new_v, new_p;
   if (state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) 
     predict_mean_analytic(state, dt, w_hat_avg, a_hat_avg, new_q, new_v, new_p, Xi_sum);
   else if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4) // 常用(默认)使用RK4
-    predict_mean_rk4(state, dt, w_hat1, a_hat1, w_hat2, a_hat2, new_q, new_v, new_p);
+    predict_mean_rk4(state, dt, w_hat1, a_hat1, w_hat2, a_hat2, new_q, new_v, new_p);  // 计算传播的均值：new_q, new_v, new_p
   else 
     predict_mean_discrete(state, dt, w_hat_avg, a_hat_avg, new_q, new_v, new_p);
 
@@ -470,32 +486,47 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state,
   Eigen::MatrixXd G = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, 12); // 噪声状态转移矩阵
   if (state->_options.integration_method == StateOptions::IntegrationMethod::RK4 ||
       state->_options.integration_method == StateOptions::IntegrationMethod::ANALYTICAL) {
-    compute_F_and_G_analytic(state, dt, w_hat_avg, a_hat_avg, w_uncorrected, a_uncorrected, new_q, new_v, new_p, Xi_sum, F, G);
+    // 维护雅可比矩阵(F、G)
+    compute_F_and_G_analytic(state, 
+                             dt, 
+                             w_hat_avg, 
+                             a_hat_avg, 
+                             w_uncorrected, // gyr测量数据（中值）
+                             a_uncorrected, 
+                             new_q, // 预测的状态量
+                             new_v, 
+                             new_p, 
+                             Xi_sum, 
+                             F, 
+                             G);
   } else {
     compute_F_and_G_discrete(state, dt, w_hat_avg, a_hat_avg, w_uncorrected, a_uncorrected, new_q, new_v, new_p, F, G);
   }
 
+  // 传播：噪声协方差 ref.
+  // note gpt 在Kalibr中，IMU的协方差通常表示为连续时间的状态协方差。
   // Construct our discrete noise covariance matrix
   // Note that we need to convert our continuous time noises to discrete
   // Equations (129) amd (130) of Trawny tech report
-  Eigen::Matrix<double, 12, 12> Qc = Eigen::Matrix<double, 12, 12>::Zero();
-  Qc.block(0, 0, 3, 3) = std::pow(_noises.sigma_w, 2) / dt * Eigen::Matrix3d::Identity();
-  Qc.block(3, 3, 3, 3) = std::pow(_noises.sigma_a, 2) / dt * Eigen::Matrix3d::Identity();
-  Qc.block(6, 6, 3, 3) = std::pow(_noises.sigma_wb, 2) / dt * Eigen::Matrix3d::Identity();
+  Eigen::Matrix<double, 12, 12> Qc = Eigen::Matrix<double, 12, 12>::Zero(); // todo 这个表示离散噪声协方差吗？
+  // todo 连续转离散。对于随机游走与高斯噪声方式一样？
+  Qc.block(0, 0, 3, 3) = std::pow(_noises.sigma_w,  2) / dt * Eigen::Matrix3d::Identity(); // rate noise 高斯噪声
+  Qc.block(3, 3, 3, 3) = std::pow(_noises.sigma_a,  2) / dt * Eigen::Matrix3d::Identity();
+  Qc.block(6, 6, 3, 3) = std::pow(_noises.sigma_wb, 2) / dt * Eigen::Matrix3d::Identity(); // random walk noise 随机游走噪声
   Qc.block(9, 9, 3, 3) = std::pow(_noises.sigma_ab, 2) / dt * Eigen::Matrix3d::Identity();
 
   // Compute the noise injected into the state over the interval
   Qd = Eigen::MatrixXd::Zero(state->imu_intrinsic_size() + 15, state->imu_intrinsic_size() + 15);
   Qd = G * Qc * G.transpose();
-  Qd = 0.5 * (Qd + Qd.transpose());
+  Qd = 0.5 * (Qd + Qd.transpose()); // 保持协方差矩阵的对称性
 
   // Now replace imu estimate and fej with propagated values
   Eigen::Matrix<double, 16, 1> imu_x = state->_imu->value();
   imu_x.block(0, 0, 4, 1) = new_q;
   imu_x.block(4, 0, 3, 1) = new_p;
   imu_x.block(7, 0, 3, 1) = new_v;
-  state->_imu->set_value(imu_x);
-  state->_imu->set_fej(imu_x);
+  state->_imu->set_value(imu_x); // note imu维护（q、p、v）
+  state->_imu->set_fej(imu_x);   // note fej维护
 }
 
 void Propagator::predict_mean_discrete(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat, const Eigen::Vector3d &a_hat,
@@ -523,9 +554,16 @@ void Propagator::predict_mean_discrete(std::shared_ptr<State> state, double dt, 
   new_p = state->_imu->pos() + state->_imu->vel() * dt + 0.5 * R_Gtoi.transpose() * a_hat * dt * dt - 0.5 * _gravity * dt * dt;
 }
 
-void Propagator::predict_mean_rk4(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat1, const Eigen::Vector3d &a_hat1,
-                                  const Eigen::Vector3d &w_hat2, const Eigen::Vector3d &a_hat2, Eigen::Vector4d &new_q,
-                                  Eigen::Vector3d &new_v, Eigen::Vector3d &new_p) {
+void Propagator::predict_mean_rk4(std::shared_ptr<State> state, 
+                                  double dt, 
+                                  const Eigen::Vector3d &w_hat1, 
+                                  const Eigen::Vector3d &a_hat1,
+                                  const Eigen::Vector3d &w_hat2, 
+                                  const Eigen::Vector3d &a_hat2, 
+                                  Eigen::Vector4d &new_q,
+                                  Eigen::Vector3d &new_v, 
+                                  Eigen::Vector3d &new_p) 
+{
 
   // Pre-compute things
   Eigen::Vector3d w_hat = w_hat1;
@@ -534,16 +572,16 @@ void Propagator::predict_mean_rk4(std::shared_ptr<State> state, double dt, const
   Eigen::Vector3d a_jerk = (a_hat2 - a_hat1) / dt;
 
   // y0 ================
-  Eigen::Vector4d q_0 = state->_imu->quat();
+  Eigen::Vector4d q_0 = state->_imu->quat(); // todo 什么坐标系
   Eigen::Vector3d p_0 = state->_imu->pos();
   Eigen::Vector3d v_0 = state->_imu->vel();
 
   // k1 ================
-  Eigen::Vector4d dq_0 = {0, 0, 0, 1};
-  Eigen::Vector4d q0_dot = 0.5 * Omega(w_hat) * dq_0;
+  Eigen::Vector4d dq_0 = {0, 0, 0, 1}; // todo 为什么是单位四元数？ 什么坐标系？
+  Eigen::Vector4d q0_dot = 0.5 * Omega(w_hat) * dq_0; // R_IG q的导数，也是微分方程。参考：JPL-Indirect Kalman Filter for 3D Attitude Estimation(86)
   Eigen::Vector3d p0_dot = v_0;
-  Eigen::Matrix3d R_Gto0 = quat_2_Rot(quat_multiply(dq_0, q_0));
-  Eigen::Vector3d v0_dot = R_Gto0.transpose() * a_hat - _gravity;
+  Eigen::Matrix3d R_Gto0 = quat_2_Rot(quat_multiply(dq_0, q_0));  // todo 这是什么？什么坐标系？
+  Eigen::Vector3d v0_dot = R_Gto0.transpose() * a_hat - _gravity; // ref. https://docs.openvins.com/propagation.html
 
   Eigen::Vector4d k1_q = q0_dot * dt;
   Eigen::Vector3d k1_p = p0_dot * dt;
@@ -606,17 +644,17 @@ void Propagator::predict_mean_rk4(std::shared_ptr<State> state, double dt, const
 
 void compute_Xi_sum(std::shared_ptr<State> state, 
                     double dt, 
-                    const Eigen::Vector3d &w_hat, 
-                    const Eigen::Vector3d &a_hat,
-                    Eigen::Matrix<double, 3, 18> &Xi_sum) 
+                    const Eigen::Vector3d &w_hat, // 角速度测量
+                    const Eigen::Vector3d &a_hat, // 加速度测量
+                    Eigen::Matrix<double, 3, 18> &Xi_sum) // 状态量
 {
 
   // Decompose our angular velocity into a direction and amount
-  double w_norm = w_hat.norm();
-  double d_th = w_norm * dt;
+  double w_norm = w_hat.norm(); // L2范数
+  double d_th = w_norm * dt;    
   Eigen::Vector3d k_hat = Eigen::Vector3d::Zero();
   if (w_norm > 1e-12) {
-    k_hat = w_hat / w_norm;
+    k_hat = w_hat / w_norm; // todo 单位化，为什么只在大数时候单位化？
   }
 
   // Compute useful identities used throughout
@@ -635,8 +673,8 @@ void compute_Xi_sum(std::shared_ptr<State> state,
 
   // Integration components will be used later
   Eigen::Matrix3d R_ktok1, Xi_1, Xi_2, Jr_ktok1, Xi_3, Xi_4;
-  R_ktok1  = ov_core::exp_so3(-w_hat * dt);
-  Jr_ktok1 = ov_core::Jr_so3(-w_hat * dt);
+  R_ktok1  = ov_core::exp_so3(-w_hat * dt); // 旋转矩阵
+  Jr_ktok1 = ov_core::Jr_so3(-w_hat * dt);  // BCH雅可比矩阵
 
   // Now begin the integration of each component
   // Based on the delta theta, let's decide which integration will be used
@@ -678,7 +716,7 @@ void compute_Xi_sum(std::shared_ptr<State> state,
   }
 
   // Store the integrated parameters
-  Xi_sum.setZero();
+  Xi_sum.setZero(); // 3x18
   Xi_sum.block(0, 0, 3, 3) = R_ktok1;
   Xi_sum.block(0, 3, 3, 3) = Xi_1;
   Xi_sum.block(0, 6, 3, 3) = Xi_2;
@@ -687,8 +725,13 @@ void compute_Xi_sum(std::shared_ptr<State> state,
   Xi_sum.block(0, 15, 3, 3) = Xi_4;
 }
 
-void Propagator::predict_mean_analytic(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat, const Eigen::Vector3d &a_hat,
-                                       Eigen::Vector4d &new_q, Eigen::Vector3d &new_v, Eigen::Vector3d &new_p,
+void Propagator::predict_mean_analytic(std::shared_ptr<State> state, 
+                                       double dt, 
+                                       const Eigen::Vector3d &w_hat, 
+                                       const Eigen::Vector3d &a_hat,
+                                       Eigen::Vector4d &new_q, 
+                                       Eigen::Vector3d &new_v, 
+                                       Eigen::Vector3d &new_p,
                                        Eigen::Matrix<double, 3, 18> &Xi_sum) {
 
   // Pre-compute things
@@ -703,23 +746,31 @@ void Propagator::predict_mean_analytic(std::shared_ptr<State> state, double dt, 
   new_p = state->_imu->pos() + state->_imu->vel() * dt + R_Gtok.transpose() * Xi_2 * a_hat - 0.5 * _gravity * dt * dt;
 }
 
-void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat,
-                                          const Eigen::Vector3d &a_hat, const Eigen::Vector3d &w_uncorrected,
-                                          const Eigen::Vector3d &a_uncorrected, const Eigen::Vector4d &new_q, const Eigen::Vector3d &new_v,
-                                          const Eigen::Vector3d &new_p, const Eigen::Matrix<double, 3, 18> &Xi_sum, Eigen::MatrixXd &F,
-                                          Eigen::MatrixXd &G) {
+void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state,
+                                          double dt, 
+                                          const Eigen::Vector3d &w_hat,
+                                          const Eigen::Vector3d &a_hat, 
+                                          const Eigen::Vector3d &w_uncorrected,
+                                          const Eigen::Vector3d &a_uncorrected, 
+                                          const Eigen::Vector4d &new_q, 
+                                          const Eigen::Vector3d &new_v,
+                                          const Eigen::Vector3d &new_p, 
+                                          const Eigen::Matrix<double, 3, 18> &Xi_sum, 
+                                          Eigen::MatrixXd &F,
+                                          Eigen::MatrixXd &G) 
+{
 
   // Get the locations of each entry of the imu state
   int local_size = 0;
-  int th_id = local_size;
+  int th_id = local_size; // 0 // code 设置id的技巧
   local_size += state->_imu->q()->size();
-  int p_id = local_size;
+  int p_id = local_size; // 3
   local_size += state->_imu->p()->size();
-  int v_id = local_size;
+  int v_id = local_size; // 6
   local_size += state->_imu->v()->size();
-  int bg_id = local_size;
+  int bg_id = local_size; // 9
   local_size += state->_imu->bg()->size();
-  int ba_id = local_size;
+  int ba_id = local_size; // 12
   local_size += state->_imu->ba()->size();
 
   // If we are doing calibration, we can define their "local" id in the state transition
@@ -729,13 +780,13 @@ void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double d
   int th_atoI_id = -1;
   int th_wtoI_id = -1;
   if (state->_options.do_calib_imu_intrinsics) {
-    Dw_id = local_size;
-    local_size += state->_calib_imu_dw->size();
-    Da_id = local_size;
-    local_size += state->_calib_imu_da->size();
+    Dw_id = local_size; // 15
+    local_size += state->_calib_imu_dw->size(); // 6维度
+    Da_id = local_size; // 21
+    local_size += state->_calib_imu_da->size(); // 6维度
     if (state->_options.do_calib_imu_g_sensitivity) {
-      Tg_id = local_size;
-      local_size += state->_calib_imu_tg->size();
+      Tg_id = local_size; // 30
+      local_size += state->_calib_imu_tg->size(); // 9维度
     }
     if (state->_options.imu_model == StateOptions::ImuModel::KALIBR) {
       th_wtoI_id = local_size;
@@ -751,11 +802,12 @@ void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double d
   Eigen::Matrix3d R_k = state->_imu->Rot();
   Eigen::Vector3d v_k = state->_imu->vel();
   Eigen::Vector3d p_k = state->_imu->pos();
-  if (state->_options.do_fej) {
+  if (state->_options.do_fej) { // todo 保持fej处理问题时，这里的变量是如何维护的？与上面的变量有什么区别？
     R_k = state->_imu->Rot_fej();
     v_k = state->_imu->vel_fej();
     p_k = state->_imu->pos_fej();
   }
+  // 预测状态 * 当前状态 => R_k1_k = R_k1_G * R_G_k // todo 确定坐标系
   Eigen::Matrix3d dR_ktok1 = quat_2_Rot(new_q) * R_k.transpose();
 
   Eigen::Matrix3d Dw = State::Dm(state->_options.imu_model, state->_calib_imu_dw->value());
@@ -765,7 +817,7 @@ void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double d
   Eigen::Matrix3d R_wtoI = state->_calib_imu_GYROtoIMU->Rot();
   Eigen::Vector3d a_k = R_atoI * Da * a_uncorrected;
   Eigen::Vector3d w_k = R_wtoI * Dw * w_uncorrected; // contains gravity correction already
-
+  // 获取相应组件
   Eigen::Matrix3d Xi_1 = Xi_sum.block(0, 3, 3, 3);
   Eigen::Matrix3d Xi_2 = Xi_sum.block(0, 6, 3, 3);
   Eigen::Matrix3d Jr_ktok1 = Xi_sum.block(0, 9, 3, 3);
@@ -773,61 +825,66 @@ void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double d
   Eigen::Matrix3d Xi_4 = Xi_sum.block(0, 15, 3, 3);
 
   // for th
-  F.block(th_id, th_id, 3, 3) = dR_ktok1;
-  F.block(p_id, th_id, 3, 3) = -skew_x(new_p - p_k - v_k * dt + 0.5 * _gravity * dt * dt) * R_k.transpose();
-  F.block(v_id, th_id, 3, 3) = -skew_x(new_v - v_k + _gravity * dt) * R_k.transpose();
+  F.block(th_id, th_id, 3, 3) = dR_ktok1;   // [0, 0][3, 3]
+  // todo 这里与文档[https://docs.openvins.com/propagation_analytical.html]不一致，其中反对称矩阵的负等于转置。skew_x^T * R^T = (R * skew_x)^T
+  F.block(p_id,  th_id, 3, 3) = -skew_x(new_p - p_k - v_k * dt + 0.5 * _gravity * dt * dt) * R_k.transpose(); // [3, 0][3, 3] 
+  // todo 这里与文档不一致，其中反对称矩阵的负等于转置。
+  F.block(v_id,  th_id, 3, 3) = -skew_x(new_v - v_k + _gravity * dt) * R_k.transpose(); // [6, 0][3, 3] 
 
   // for p
-  F.block(p_id, p_id, 3, 3).setIdentity();
+  F.block(p_id, p_id, 3, 3).setIdentity();   // [3, 3][3, 3]
 
   // for v
-  F.block(p_id, v_id, 3, 3) = Eigen::Matrix3d::Identity() * dt;
-  F.block(v_id, v_id, 3, 3).setIdentity();
+  F.block(p_id, v_id, 3, 3) = Eigen::Matrix3d::Identity() * dt;  // [3, 6][3, 3]
+  F.block(v_id, v_id, 3, 3).setIdentity();   // [6, 6][3, 3]
 
   // for bg
-  F.block(th_id, bg_id, 3, 3) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw;
-  F.block(p_id, bg_id, 3, 3) = R_k.transpose() * Xi_4 * R_wtoI * Dw;
-  F.block(v_id, bg_id, 3, 3) = R_k.transpose() * Xi_3 * R_wtoI * Dw;
-  F.block(bg_id, bg_id, 3, 3).setIdentity();
+  F.block(th_id, bg_id, 3, 3) = -dR_ktok1 * Jr_ktok1 * dt * (R_wtoI * Dw); // [0, 9][3, 3]
+  F.block(p_id,  bg_id, 3, 3) = R_k.transpose() * Xi_4 * (R_wtoI * Dw);    // [3, 9][3, 3]
+  F.block(v_id,  bg_id, 3, 3) = R_k.transpose() * Xi_3 * (R_wtoI * Dw);    // [6, 9][3, 3]
+  F.block(bg_id, bg_id, 3, 3).setIdentity();                               // [9, 9][3, 3]
 
   // for ba
-  F.block(th_id, ba_id, 3, 3) = dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * Tg * R_atoI * Da;
-  F.block(p_id, ba_id, 3, 3) = -R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * Da;
-  F.block(v_id, ba_id, 3, 3) = -R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * Da;
-  F.block(ba_id, ba_id, 3, 3).setIdentity();
+  F.block(th_id, ba_id, 3, 3) = dR_ktok1 * Jr_ktok1 * dt * (R_wtoI * Dw * Tg * R_atoI * Da);       // [0, 12][3, 3]
+  F.block(p_id,  ba_id, 3, 3) = -R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * Da; // [3, 12][3, 3] 此项做了合并
+  F.block(v_id,  ba_id, 3, 3) = -R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * Da; // [6, 12][3, 3] 此项做了合并 ref.https://docs.openvins.com/propagation_analytical.html
+  F.block(ba_id, ba_id, 3, 3).setIdentity();                                                       // [12, 12][3, 3]           
 
   // begin to add the state transition matrix for the omega intrinsics Dw part
   if (Dw_id != -1) {
+    // note 这里是3x6维度
     Eigen::MatrixXd H_Dw = compute_H_Dw(state, w_uncorrected);
-    F.block(th_id, Dw_id, 3, state->_calib_imu_dw->size()) = dR_ktok1 * Jr_ktok1 * dt * R_wtoI * H_Dw;
-    F.block(p_id, Dw_id, 3, state->_calib_imu_dw->size()) = -R_k.transpose() * Xi_4 * R_wtoI * H_Dw;
-    F.block(v_id, Dw_id, 3, state->_calib_imu_dw->size()) = -R_k.transpose() * Xi_3 * R_wtoI * H_Dw;
-    F.block(Dw_id, Dw_id, state->_calib_imu_dw->size(), state->_calib_imu_dw->size()).setIdentity();
+    F.block(th_id, Dw_id, 3, state->_calib_imu_dw->size()) = dR_ktok1 * Jr_ktok1 * dt * R_wtoI * H_Dw; // [0, 15][3, 6]
+    F.block(p_id,  Dw_id, 3, state->_calib_imu_dw->size()) = -R_k.transpose() * Xi_4 * R_wtoI * H_Dw;  // [3, 15][3, 6]
+    F.block(v_id,  Dw_id, 3, state->_calib_imu_dw->size()) = -R_k.transpose() * Xi_3 * R_wtoI * H_Dw;  // [3, 15][3, 6]
+    F.block(Dw_id, Dw_id, state->_calib_imu_dw->size(), state->_calib_imu_dw->size()).setIdentity();   // [15, 15][6, 6] 
   }
 
   // begin to add the state transition matrix for the acc intrinsics Da part
   if (Da_id != -1) {
+    // note 这里是3x6维度
     Eigen::MatrixXd H_Da = compute_H_Da(state, a_uncorrected);
     F.block(th_id, Da_id, 3, state->_calib_imu_da->size()) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * Tg * R_atoI * H_Da;
-    F.block(p_id, Da_id, 3, state->_calib_imu_da->size()) = R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * H_Da;
-    F.block(v_id, Da_id, 3, state->_calib_imu_da->size()) = R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * H_Da;
+    F.block(p_id,  Da_id, 3, state->_calib_imu_da->size()) = R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * H_Da;
+    F.block(v_id,  Da_id, 3, state->_calib_imu_da->size()) = R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * H_Da;
     F.block(Da_id, Da_id, state->_calib_imu_da->size(), state->_calib_imu_da->size()).setIdentity();
   }
 
   // add the state transition matrix of the Tg part
   if (Tg_id != -1) {
+    // note 这里是3x9维度
     Eigen::MatrixXd H_Tg = compute_H_Tg(state, a_k);
     F.block(th_id, Tg_id, 3, state->_calib_imu_tg->size()) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * H_Tg;
-    F.block(p_id, Tg_id, 3, state->_calib_imu_tg->size()) = R_k.transpose() * Xi_4 * R_wtoI * Dw * H_Tg;
-    F.block(v_id, Tg_id, 3, state->_calib_imu_tg->size()) = R_k.transpose() * Xi_3 * R_wtoI * Dw * H_Tg;
+    F.block(p_id,  Tg_id, 3, state->_calib_imu_tg->size()) = R_k.transpose() * Xi_4 * R_wtoI * Dw * H_Tg;
+    F.block(v_id,  Tg_id, 3, state->_calib_imu_tg->size()) = R_k.transpose() * Xi_3 * R_wtoI * Dw * H_Tg;
     F.block(Tg_id, Tg_id, state->_calib_imu_tg->size(), state->_calib_imu_tg->size()).setIdentity();
   }
 
   // begin to add the state transition matrix for the R_ACCtoIMU part
   if (th_atoI_id != -1) {
     F.block(th_id, th_atoI_id, 3, 3) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * Tg * ov_core::skew_x(a_k);
-    F.block(p_id, th_atoI_id, 3, 3) = R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * ov_core::skew_x(a_k);
-    F.block(v_id, th_atoI_id, 3, 3) = R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * ov_core::skew_x(a_k);
+    F.block(p_id,  th_atoI_id, 3, 3) = R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * ov_core::skew_x(a_k);
+    F.block(v_id,  th_atoI_id, 3, 3) = R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * ov_core::skew_x(a_k);
     F.block(th_atoI_id, th_atoI_id, 3, 3).setIdentity();
   }
 
@@ -841,16 +898,17 @@ void Propagator::compute_F_and_G_analytic(std::shared_ptr<State> state, double d
 
   // construct the G part
   G.block(th_id, 0, 3, 3) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw;
-  G.block(p_id, 0, 3, 3) = R_k.transpose() * Xi_4 * R_wtoI * Dw;
-  G.block(v_id, 0, 3, 3) = R_k.transpose() * Xi_3 * R_wtoI * Dw;
+  G.block(p_id,  0, 3, 3) = R_k.transpose() * Xi_4 * R_wtoI * Dw;
+  G.block(v_id,  0, 3, 3) = R_k.transpose() * Xi_3 * R_wtoI * Dw;
   G.block(th_id, 3, 3, 3) = dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * Tg * R_atoI * Da;
-  G.block(p_id, 3, 3, 3) = -R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * Da;
-  G.block(v_id, 3, 3, 3) = -R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * Da;
+  G.block(p_id,  3, 3, 3) = -R_k.transpose() * (Xi_2 + Xi_4 * R_wtoI * Dw * Tg) * R_atoI * Da;
+  G.block(v_id,  3, 3, 3) = -R_k.transpose() * (Xi_1 + Xi_3 * R_wtoI * Dw * Tg) * R_atoI * Da;
   G.block(bg_id, 6, 3, 3) = dt * Eigen::Matrix3d::Identity();
   G.block(ba_id, 9, 3, 3) = dt * Eigen::Matrix3d::Identity();
 }
 
-void Propagator::compute_F_and_G_discrete(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat,
+void Propagator::compute_F_and_G_discrete(std::shared_ptr<State> state, 
+                                          double dt, const Eigen::Vector3d &w_hat,
                                           const Eigen::Vector3d &a_hat, const Eigen::Vector3d &w_uncorrected,
                                           const Eigen::Vector3d &a_uncorrected, const Eigen::Vector4d &new_q, const Eigen::Vector3d &new_v,
                                           const Eigen::Vector3d &new_p, Eigen::MatrixXd &F, Eigen::MatrixXd &G) {

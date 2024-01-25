@@ -360,12 +360,13 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     // Propagate the state forward in time
     double time0_cam = last_zupt_state_timestamp;
     double time1_cam = timestamp;
+    // IMU传播与克隆
     _prop->propagate_and_clone(state, time1_cam);
 
     // Create the update system!
-    H = Eigen::MatrixXd::Zero(9, 15);
+    H   = Eigen::MatrixXd::Zero(9, 15);
     res = Eigen::VectorXd::Zero(9);
-    R = Eigen::MatrixXd::Identity(9, 9);
+    R   = Eigen::MatrixXd::Identity(9, 9);
 
     // residual (order is ori, pos, vel)
     Eigen::Matrix3d R_GtoI0 = state->_clones_IMU.at(time0_cam)->Rot();
