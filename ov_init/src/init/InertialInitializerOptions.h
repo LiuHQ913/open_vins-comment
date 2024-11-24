@@ -67,7 +67,7 @@ struct InertialInitializerOptions {
   /// Variance threshold on our acceleration to be classified as moving
   double init_imu_thresh = 1.0;
 
-  /// Max disparity we will consider the unit to be stationary
+  /// Max disparity we will consider the unit to be stationary 单位像素
   double init_max_disparity = 1.0;
 
   /// Number of features we should try to track

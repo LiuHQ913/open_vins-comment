@@ -71,19 +71,22 @@ void InertialInitializer::feed_imu(const ov_core::ImuData &message, double oldes
   }
 }
 
-bool InertialInitializer::initialize(double &timestamp, Eigen::MatrixXd &covariance, std::vector<std::shared_ptr<ov_type::Type>> &order,
-                                     std::shared_ptr<ov_type::IMU> t_imu, bool wait_for_jerk) {
-
+bool InertialInitializer::initialize(double &timestamp, 
+                                     Eigen::MatrixXd &covariance, 
+                                     std::vector<std::shared_ptr<ov_type::Type>> &order,
+                                     std::shared_ptr<ov_type::IMU> t_imu, 
+                                     bool wait_for_jerk) 
+{
   // Get the newest and oldest timestamps we will try to initialize between!
   double newest_cam_time = -1;
-  for (auto const &feat : _db->get_internal_data()) {
-    for (auto const &camtimepair : feat.second->timestamps) {
-      for (auto const &time : camtimepair.second) {
-        newest_cam_time = std::max(newest_cam_time, time);
+  for (auto const &feat : _db->get_internal_data()) {         // std::unordered_map<size_t, std::shared_ptr<Feature>>
+    for (auto const &camtimepair : feat.second->timestamps) { // std::unordered_map<size_t, std::vector<double>>
+      for (auto const &time : camtimepair.second) {           // std::vector<double>
+        newest_cam_time = std::max(newest_cam_time, time);    // code 取最大时间（很传统）
       }
     }
   }
-  double oldest_time = newest_cam_time - params.init_window_time - 0.10;
+  double oldest_time = newest_cam_time - params.init_window_time - 0.10; // 根据初始化窗口时间计算最早时间，例：3.0 - 1.0 - 0.10 = 1.90
   if (newest_cam_time < 0 || oldest_time < 0) {
     return false;
   }
@@ -100,11 +103,11 @@ bool InertialInitializer::initialize(double &timestamp, Eigen::MatrixXd &covaria
   // If disparity is zero or negative we will always use the static initializer
   bool disparity_detected_moving_1to0 = false;
   bool disparity_detected_moving_2to1 = false;
-  if (params.init_max_disparity > 0) {
+  if (params.init_max_disparity > 0) { // 可以根据是否有最大视差来判断是否需要计算视差
 
     // Get the disparity statistics from this image to the previous
     // Only compute the disparity for the oldest half of the initialization period
-    double newest_time_allowed = newest_cam_time - 0.5 * params.init_window_time;
+    double newest_time_allowed = newest_cam_time - 0.5 * params.init_window_time; // 减去窗口的一半时间
     int num_features0 = 0;
     int num_features1 = 0;
     double avg_disp0, avg_disp1;
@@ -128,17 +131,21 @@ bool InertialInitializer::initialize(double &timestamp, Eigen::MatrixXd &covaria
   // Use our static initializer!
   // CASE1: if our disparity says we were static in last window and have moved in the newest, we have a jerk
   // CASE2: if both disparities are below the threshold, then the platform has been stationary during both periods
-  bool has_jerk = (!disparity_detected_moving_1to0 && disparity_detected_moving_2to1);
+  bool has_jerk = (!disparity_detected_moving_1to0 &&  disparity_detected_moving_2to1); // 由静止到运动就是一个jerk
   bool is_still = (!disparity_detected_moving_1to0 && !disparity_detected_moving_2to1);
-  if (((has_jerk && wait_for_jerk) || (is_still && !wait_for_jerk)) && params.init_imu_thresh > 0.0) {
+  if (((has_jerk && wait_for_jerk) || (is_still && !wait_for_jerk)) && // 根据是否存在零速检测来判断是否需要等待jerk
+        params.init_imu_thresh > 0.0) // todo 静止初始化需要存在视差
+  {
     PRINT_DEBUG(GREEN "[init]: USING STATIC INITIALIZER METHOD!\n" RESET);
-    return init_static->initialize(timestamp, covariance, order, t_imu, wait_for_jerk);
-  } else if (params.init_dyn_use && !is_still) {
+    return init_static->initialize(timestamp, covariance, order, t_imu, wait_for_jerk); // kernel // todo flag
+  }
+  else if (params.init_dyn_use && !is_still) {
     PRINT_DEBUG(GREEN "[init]: USING DYNAMIC INITIALIZER METHOD!\n" RESET);
     std::map<double, std::shared_ptr<ov_type::PoseJPL>> _clones_IMU;
     std::unordered_map<size_t, std::shared_ptr<ov_type::Landmark>> _features_SLAM;
-    return init_dynamic->initialize(timestamp, covariance, order, t_imu, _clones_IMU, _features_SLAM);
-  } else {
+    return init_dynamic->initialize(timestamp, covariance, order, t_imu, _clones_IMU, _features_SLAM); // kernel
+  }
+  else {
     std::string msg = (has_jerk) ? "" : "no accel jerk detected";
     msg += (has_jerk || is_still) ? "" : ", ";
     msg += (is_still) ? "" : "platform moving too much";

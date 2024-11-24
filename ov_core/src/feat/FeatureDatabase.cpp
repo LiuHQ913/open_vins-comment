@@ -247,10 +247,14 @@ void FeatureDatabase::cleanup_measurements(double timestamp) {
   }
 }
 
+/*
+  UpdaterZeroVelocity.cpp 325 : 传入上一次零速状态时间
+*/
 void FeatureDatabase::cleanup_measurements_exact(double timestamp) {
   std::lock_guard<std::mutex> lck(mtx);
   std::vector<double> timestamps = {timestamp};
-  for (auto it = features_idlookup.begin(); it != features_idlookup.end();) {
+  for (auto it = features_idlookup.begin(); it != features_idlookup.end();) // todo 哪里维护features_idlookup？
+  {
     // Remove the older measurements
     (*it).second->clean_invalid_measurements(timestamps);
     // Count how many measurements

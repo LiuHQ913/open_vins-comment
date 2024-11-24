@@ -34,8 +34,12 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_init;
 
-bool StaticInitializer::initialize(double &timestamp, Eigen::MatrixXd &covariance, std::vector<std::shared_ptr<Type>> &order,
-                                   std::shared_ptr<IMU> t_imu, bool wait_for_jerk) {
+bool StaticInitializer::initialize(double &timestamp, 
+                                   Eigen::MatrixXd &covariance, 
+                                   std::vector<std::shared_ptr<Type>> &order,
+                                   std::shared_ptr<IMU> t_imu, 
+                                   bool wait_for_jerk) 
+{
 
   // Return if we don't have any measurements
   if (imu_data->size() < 2) {

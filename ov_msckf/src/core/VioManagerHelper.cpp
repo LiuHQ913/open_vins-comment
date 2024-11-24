@@ -80,7 +80,7 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
   // Directly return if the initialization thread is running
   // Note that we lock on the queue since we could have finished an update
   // And are using this queue to propagate the state forward. We should wait in this case
-  if (thread_init_running) {
+  if (thread_init_running) { // 原子布尔值
     std::lock_guard<std::mutex> lck(camera_queue_init_mtx);
     camera_queue_init.push_back(message.timestamp);
     return false;
@@ -93,7 +93,7 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
 
   // Run the initialization in a second thread so it can go as slow as it desires
   thread_init_running = true;
-  std::thread thread([&] {
+  std::thread thread([&] { // code lambda可以没有'()'
     // Returns from our initializer
     double timestamp;
     Eigen::MatrixXd covariance;
@@ -103,7 +103,7 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
     // Try to initialize the system
     // We will wait for a jerk if we do not have the zero velocity update enabled
     // Otherwise we can initialize right away as the zero velocity will handle the stationary case
-    bool wait_for_jerk = (updaterZUPT == nullptr);
+    bool wait_for_jerk = (updaterZUPT == nullptr); // todo 什么意思 // code 根据是否存在零速检测判断是否需要等待加速度突变
     bool success = initializer->initialize(timestamp, covariance, order, state->_imu, wait_for_jerk);
 
     // If we have initialized successfully we will set the covariance and state elements as needed

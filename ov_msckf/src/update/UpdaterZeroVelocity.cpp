@@ -139,7 +139,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // Large final matrices used for update (we will compress these)
   int h_size = (integrated_accel_constraint) ? 12 : 9; // note 这里是9维度，q提供3个自由度 // todo 各个开源算法中都是这样吗？
   int m_size = 6 * ((int)imu_recent.size() - 1);       // 一个imu提供6个变量
-  Eigen::MatrixXd H   = Eigen::MatrixXd::Zero(m_size, h_size);
+  Eigen::MatrixXd H   = Eigen::MatrixXd::Zero(m_size, h_size); // note 雅可比矩阵， 是观测方程的雅可比矩阵
   Eigen::VectorXd res = Eigen::VectorXd::Zero(m_size);
 
   // IMU intrinsic calibration estimates (static)
@@ -148,9 +148,9 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   Eigen::Matrix3d Tg = State::Tg(state->_calib_imu_tg->value()); // 零矩阵
 
   // 参考 https://docs.openvins.com/update-zerovelocity.html#update-zerovelocity-meas
-  // Loop through all our IMU and construct the residual and Jacobian
+  // Loop through all our IMU and construct the residual and Jacobian 循环所有的IMU，并构造残差和雅可比矩阵
   // TODO: should add jacobians here in respect to IMU intrinsics!!
-  // State order is: [q_GtoI, bg, ba, v_IinG] // note 这里坐标系变换
+  // State order is: [q_GtoI, bg, ba, v_IinG] // note 状态量， 注意这里的坐标系
   // Measurement order is: [w_true = 0, a_true = 0 or v_k+1 = 0]
   // w_true = w_m - bw - nw
   // a_true = a_m - ba - R*g - na  // todo R、g的坐标系 // lhq g在G系下
@@ -162,11 +162,12 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     double dt = imu_recent.at(i + 1).timestamp - imu_recent.at(i).timestamp;
     /*
       残差： err = a_true - measurement function
-            a_true = 0 => err = -measurement function
-      残差： a_hat = am - ba
-      残差： w_hat = wm - bg 
-      注意，白噪声的均值为0
+            a_true = 0 => err = -measurement function 因为零速所以（a_true = 0）
+      残差： a_hat = am - ba - na;
+      残差： w_hat = wm - bg - ng;
+      注意，白噪声(na、ng)的均值为0
     */
+    // note 观测方程 ：包含'状态量'与'测量值'
     Eigen::Vector3d a_hat = state->_calib_imu_ACCtoIMU->Rot()  * Da * (imu_recent.at(i).am - state->_imu->bias_a()); // imu系下的测量
     Eigen::Vector3d w_hat = state->_calib_imu_GYROtoIMU->Rot() * Dw * (imu_recent.at(i).wm - state->_imu->bias_g() - Tg * a_hat);
 
@@ -174,15 +175,16 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     // Measurement noise (convert from continuous to discrete)
     // NOTE: The dt time might be different if we have "cut" any imu measurements
     // NOTE: We are performing "whittening" thus, we will decompose R_meas^-1 = L*L^t
-    // NOTE: This is then multiplied to the residual and Jacobian (equivalent to just updating with R_meas)
+    // NOTE: This is then multiplied to the residual and Jacobian (equivalent to just updating with R_meas) 然后再乘以残差和雅可比矩阵
     // NOTE: See Maybeck Stochastic Models, Estimation, and Control Vol. 1 Equations (7-21a)-(7-21c)
     double w_omega = std::sqrt(dt) / _noises.sigma_w; // todo 这是标准差的倒数吗？
     double w_accel = std::sqrt(dt) / _noises.sigma_a;
-    double w_accel_v = 1.0 / (std::sqrt(dt) * _noises.sigma_a);
+    double w_accel_v = 1.0 / (std::sqrt(dt) * _noises.sigma_a); // todo 这里是什么？// lhq 从单位角度推导
 
     // Measurement residual (true value is zero)
     res.block(6 * i + 0, 0, 3, 1) = -w_omega * w_hat; // todo 带有权重的残差？
-    if (!integrated_accel_constraint) {  // 加速度残差
+    if (!integrated_accel_constraint) {  // 系统是否积分加速度并假设速度应为零。这是一个未经测试的特性，所以默认值为假。
+      // 加速度残差 
       res.block(6 * i + 3, 0, 3, 1) = -w_accel * (a_hat - state->_imu->Rot() * _gravity);
     }
     else { // 速度残差
@@ -190,10 +192,10 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     }
 
     // Measurement Jacobian
-    // todo state->_imu->Rot_fej()返回的fej矩阵，是如何计算的？
+    // todo state->_imu->Rot_fej()返回的fej矩阵，是如何计算的？ // lhq 在clone函数中维护
     // gpt -w_omega是一个根据时间间隔和噪声标准差计算出的权重，用于在状态估计过程中对角速度测量进行适当的加权和白化
-    Eigen::Matrix3d R_GtoI_jacob = (state->_options.do_fej) ? state->_imu->Rot_fej() : state->_imu->Rot();
-    H.block(6 * i + 0, 3, 3, 3) = -w_omega * Eigen::Matrix3d::Identity();       // 对bg的导数 // TODO w_omega表示什么 // lhq 白化
+    Eigen::Matrix3d R_GtoI_jacob = (state->_options.do_fej) ? state->_imu->Rot_fej() : state->_imu->Rot(); // note 什么时候会用到fej的雅可比呢？
+    H.block(6 * i + 0, 3, 3, 3) = -w_omega * Eigen::Matrix3d::Identity();       // 对bg的导数 // TODO w_omega表示什么 // lhq 白化、协方差的逆（信息矩阵）
     if (!integrated_accel_constraint) {
       H.block(6 * i + 3, 0, 3, 3) = -w_accel * skew_x(R_GtoI_jacob * _gravity); // 对R_GtoI的导数
       H.block(6 * i + 3, 6, 3, 3) = -w_accel * Eigen::Matrix3d::Identity();     // 对ba的导数
@@ -207,7 +209,8 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   }
 
   // Compress the system (we should be over determined)
-  UpdaterHelper::measurement_compress_inplace(H, res); // todo 左零空间投影，排除什么信息？ 做下打印吧
+  // todo 左零空间投影，排除什么信息？什么情况下可以做QR分解进行压缩 做下打印吧  // lhq 压缩矩阵，为后续矩阵乘法做加速
+  UpdaterHelper::measurement_compress_inplace(H, res); 
   if (H.rows() < 1) {
     return false;
   }
@@ -222,7 +225,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // 雅可比矩阵为单位矩阵
   // Next propagate the biases forward in time
   // NOTE: G*Qd*G^t = dt*Qd*dt = dt*(1/dt*Qc)*dt = dt*Qc // todo Qd是离散 Qc是连续？
-  Eigen::MatrixXd Q_bias = Eigen::MatrixXd::Identity(6, 6);
+  Eigen::MatrixXd Q_bias = Eigen::MatrixXd::Identity(6, 6);   // 帧间离散协防差
   Q_bias.block(0, 0, 3, 3) *= dt_summed * _noises.sigma_wb_2; // imu测量累积时间 * 角度随机游走协方差
   Q_bias.block(3, 3, 3, 3) *= dt_summed * _noises.sigma_ab_2;
 
@@ -239,13 +242,22 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   // NOTE: we don't propagate first since if we fail the chi2 then we just want to return and do normal logic
   Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hx_order);
   if (model_time_varying_bias) { // 考虑随时间变化的随机游走偏差
-    // 起始位置[3 3]，大小6x6
+    // 起始位置[3 3]，大小6x6 。 这里只对应bias的协方差
     P_marg.block(3, 3, 6, 6) += Q_bias; // gpt 将偏差的噪声协方差矩阵Q_bias添加到边缘协方差矩阵的对应块中。这是为了考虑在状态更新之前偏差的随机游走。
   }
-  Eigen::MatrixXd S = H * P_marg * H.transpose() + R; // note 协方差传播，参考文档https://docs.openvins.com/update-zerovelocity.html
+  Eigen::MatrixXd S = H * P_marg * H.transpose() + R; // note 协方差传播，ref.https://docs.openvins.com/update.html
   // code S.llt().solve(res)是利用S的Cholesky分解来解线性方程 S*x=res，得到向量x，即 x=(S^-1)*res。chi2 = res*(S^-1)*res
   // note 卡方距离检验（Chi-squared test），以判断当前的状态估计是否可靠。
-  double chi2 = res.dot(S.llt().solve(res));
+  /*
+    gpt 
+    残差(res)乘以权重是为了“白化”处理，这是一种常用的统计技术，目的是将具有相关性和非均匀方差的观测值转换为一组标准化的、方差相等且相互独立的观测值。
+    这样做可以简化后续的统计分析，特别是在最小二乘估计和假设检验中。
+    即使 res 已经被加权，协方差矩阵 S 仍然需要计算，因为它代表了测量的不确定性。
+    在卡方检验中，我们不仅需要残差，还需要知道这些残差的分布情况，这就是为什么要用 H * P_marg * H.transpose() + R 来计算 S。
+    这里的 R 是测量噪声协方差矩阵，而 H * P_marg * H.transpose() 是预测测量的协方差，它们合在一起给出了完整的预测测量不确定性。
+    在状态估计中，即使残差已经被加权，我们仍然需要考虑系统的不确定性，这是通过协方差矩阵 P_marg 来表示的。这样，卡方值 chi2 就能够反映出残差相对于系统不确定性的大小，从而进行有效的异常值检测。
+  */
+  double chi2 = res.dot(S.llt().solve(res)); // res 本身就是带有权重，为什么还有信息矩阵的权重
 
   // Get our threshold (we precompute up to 1000 but handle the case that it is more)
   double chi2_check;
@@ -297,7 +309,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   }
   PRINT_INFO(CYAN "[ZUPT]: accepted |v_IinG| = %.3f (chi2 %.3f < %.3f)\n" RESET, state->_imu->vel().norm(), chi2,
              _options.chi2_multipler * chi2_check);
-
+  // 当前处于零速状态
   /*
     todo 这段注释在说啥？
     gpt 如果已经进行过至少两次ZUPT，那么就不会在这个时间戳进行克隆操作，而是进行零速度更新。
@@ -316,7 +328,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   /* 
     gpt 零速度更新是一种用于惯性导航系统（INS）的技术，它利用了当载体静止时，速度为零的事实来校正IMU（惯性测量单元）的误差。
     gpt 代码的主要逻辑分为两部分：
-    gpt   1. 如果explicitly_enforce_zero_motion标志为false，则执行正常的状态更新。这包括使用IMU测量直接更新状态，以及将偏差（bias）向前传播。
+    gpt   1. 如果explicitly_enforce_zero_motion标志为false(默认)，则执行正常的状态更新。这包括使用IMU测量直接更新状态，以及将偏差（bias）向前传播。
     gpt   2. 如果explicitly_enforce_zero_motion标志为true， 则执行一个更为严格的更新。这涉及到将状态向前传播，并显式地将方向（orientation）、位置（position）和速度（velocity）设置为零。
 
     gpt 在第二部分中，代码首先使用propagate_and_clone方法将状态向前传播到新的时间戳。
@@ -330,13 +342,27 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
   if (!explicitly_enforce_zero_motion) {
 
     // Next propagate the biases forward in time
-    // NOTE: G*Qd*G^t = dt*Qd*dt = dt*Qc // todo 这是什么公式？
+    // NOTE: G*Qd*G^t = dt*Qd*dt = dt*Qc // todo 这是什么公式？// lhq 这里认为G为单位
+    /*
+      gpt 
+      注释中的 G*Qd*G^t = dt*Qd*dt = dt*Qc 表达的是在离散时间扩展卡尔曼滤波器（EKF）中，
+      连续时间过程噪声协方差矩阵Qc到离散时间过程噪声协方差矩阵Qd的转换。
+      - G 是状态转移矩阵的雅可比矩阵，也称为过程模型的噪声增益矩阵。
+      - Qd 是离散时间的过程噪声协方差矩阵。
+      - Qc 是连续时间的过程噪声协方差矩阵。
+      - dt 是时间步长。
+      在连续时间系统中，过程噪声协方差矩阵Qc通常是一个描述系统噪声特性的常数矩阵。当我们将连续时间系统离散化时，
+      我们需要将这个连续时间协方差矩阵转换为适用于离散时间步长dt的矩阵Qd。
+      这个转换通常涉及到将连续时间协方差矩阵乘以时间步长dt，并且可能还需要考虑状态转移矩阵的噪声增益G。
+      这里的注释简化了这个过程，直接使用dt*Qc来表示离散时间的过程噪声协方差矩阵Qd，
+      这是在假设G是单位矩阵或者噪声直接作用于状态变量的情况下的近似。
+    */
     if (model_time_varying_bias) { // 考虑随时间变化的随机游走偏差,更新协方差
       Eigen::MatrixXd Phi_bias = Eigen::MatrixXd::Identity(6, 6);
       std::vector<std::shared_ptr<Type>> Phi_order;
       Phi_order.push_back(state->_imu->bg()); // todo 这里bg、ba在该函数前段有修改吗？
       Phi_order.push_back(state->_imu->ba());
-      // kernel 传播(相关)状态变量协方差矩阵
+      // kernel 传播(bias)状态变量协方差矩阵
       StateHelper::EKFPropagation(state, 
                                   Phi_order, // order_NEW Contiguous variables that have evolved according to this state transition
                                   Phi_order, // order_OLD Variable ordering used in the state transition
@@ -363,33 +389,36 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     // IMU传播与克隆
     _prop->propagate_and_clone(state, time1_cam);
 
+    // todo 没有找到参考文档，这里的更新是如何推导的？
     // Create the update system!
     H   = Eigen::MatrixXd::Zero(9, 15);
     res = Eigen::VectorXd::Zero(9);
     R   = Eigen::MatrixXd::Identity(9, 9);
 
     // residual (order is ori, pos, vel)
-    Eigen::Matrix3d R_GtoI0 = state->_clones_IMU.at(time0_cam)->Rot();
-    Eigen::Vector3d p_I0inG = state->_clones_IMU.at(time0_cam)->pos();
-    Eigen::Matrix3d R_GtoI1 = state->_clones_IMU.at(time1_cam)->Rot();
-    Eigen::Vector3d p_I1inG = state->_clones_IMU.at(time1_cam)->pos();
+    Eigen::Matrix3d R_GtoI0 = state->_clones_IMU.at(time0_cam)->Rot(); // I0系下的G系的姿态 
+    Eigen::Vector3d p_I0inG = state->_clones_IMU.at(time0_cam)->pos(); // G系下I0的位置
+    Eigen::Matrix3d R_GtoI1 = state->_clones_IMU.at(time1_cam)->Rot(); // I1系下的G系的姿态 
+    Eigen::Vector3d p_I1inG = state->_clones_IMU.at(time1_cam)->pos(); // G系下I1的位置
+    // 残差向量
     res.block(0, 0, 3, 1) = -log_so3(R_GtoI0 * R_GtoI1.transpose());
     res.block(3, 0, 3, 1) = p_I1inG - p_I0inG;
     res.block(6, 0, 3, 1) = state->_imu->vel();
     res *= -1;
 
     // jacobian (order is q0, p0, q1, p1, v0)
-    Hx_order.clear();
+    Hx_order.clear(); // 清空：用于存放状态变量指针的容器 ； 重新存放
     Hx_order.push_back(state->_clones_IMU.at(time0_cam));
     Hx_order.push_back(state->_clones_IMU.at(time1_cam));
     Hx_order.push_back(state->_imu->v());
     if (state->_options.do_fej) {
-      R_GtoI0 = state->_clones_IMU.at(time0_cam)->Rot_fej();
+      // state->_clones_IMU 是一个PoseJPL类型的map容器
+      R_GtoI0 = state->_clones_IMU.at(time0_cam)->Rot_fej(); // fej 在clone()函数中设置
     }
-    H.block(0, 0, 3, 3) = Eigen::Matrix3d::Identity();
-    H.block(0, 6, 3, 3) = -R_GtoI0;
-    H.block(3, 3, 3, 3) = -Eigen::Matrix3d::Identity();
-    H.block(3, 9, 3, 3) = Eigen::Matrix3d::Identity();
+    H.block(0, 0, 3, 3)  = Eigen::Matrix3d::Identity(); // q0
+    H.block(0, 6, 3, 3)  = -R_GtoI0; // p0 // note 使用fej给的雅可比矩阵 
+    H.block(3, 3, 3, 3)  = -Eigen::Matrix3d::Identity();
+    H.block(3, 9, 3, 3)  = Eigen::Matrix3d::Identity();
     H.block(6, 12, 3, 3) = Eigen::Matrix3d::Identity();
 
     // noise (order is ori, pos, vel)
@@ -398,8 +427,10 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state, double timest
     R.block(6, 6, 3, 3) *= std::pow(1e-1, 2);
 
     // finally update and remove the old clone
-    StateHelper::EKFUpdate(state, Hx_order, H, res, R);
-    StateHelper::marginalize(state, state->_clones_IMU.at(time1_cam));
+    StateHelper::EKFUpdate(state, Hx_order, H, res, R); // todo 这是什么更新？
+    // 直接marg掉变量(state->_clones_IMU.at(time1_cam))
+    StateHelper::marginalize(state, 
+                             state->_clones_IMU.at(time1_cam));
     state->_clones_IMU.erase(time1_cam);
   }
 

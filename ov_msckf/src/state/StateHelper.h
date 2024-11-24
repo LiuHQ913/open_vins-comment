@@ -132,11 +132,11 @@ public:
   /**
    * @brief Marginalizes a variable, properly modifying the ordering/covariances in the state
    *
-   * This function can support any Type variable out of the box.
-   * Right now the marginalization of a sub-variable/type is not supported.
+   * This function can support any Type variable out of the box. 此函数可以支持任何现成的类型变量。
+   * Right now the marginalization of a sub-variable/type is not supported. 目前还不支持对子变量/类型的边缘化。
    * For example if you wanted to just marginalize the orientation of a PoseJPL, that isn't supported.
-   * We will first remove the rows and columns corresponding to the type (i.e. do the marginalization).
-   * After we update all the type ids so that they take into account that the covariance has shrunk in parts of it.
+   * We will first remove the rows and columns corresponding to the type (i.e. do the marginalization). 我们将首先删除与该类型对应的行和列
+   * After we update all the type ids so that they take into account that the covariance has shrunk in parts of it. 更新所有类型ID之后，以便它们考虑到协方差在某些部分已经缩小了
    *
    * @param state Pointer to state
    * @param marg Pointer to variable to marginalize

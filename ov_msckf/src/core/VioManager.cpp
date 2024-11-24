@@ -332,15 +332,22 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   {
     // If the same state time, use the previous timestep decision
     if (state->_timestamp != message.timestamp) { // todo 为什么需要判断是否相等？// lhq state是filter state，目的是由state timestamp传播到当前message timestamp
+      /*
+        检测系统是否处理零速状态，若为零速状态则进行更新
+          1. 保持时间延迟的设置，维护时间偏移量
+          2. 获取time0~time1之间的imu数据
+          3. 
+        若系统处于零速则返回True
+      */
       did_zupt_update = updaterZUPT->try_update(state, message.timestamp); // 检测系统是否为零速，并更新状态
-    }
-    if (did_zupt_update) { // todo 时间戳相等时，在做什么工作？
+    } // todo 时间戳相等时，在做什么工作？
+    if (did_zupt_update) { 
       assert(state->_timestamp == message.timestamp);
       // 当前时间戳 + 相机到IMU的时间偏移 - 0.10（留出一些余量）
       // 例： 99s + 0.05 - 0.1 = 98.95s， 清除98.95s之前的imu数据
       propagator->clean_old_imu_measurements( message.timestamp + state->_calib_dt_CAMtoIMU->value()(0) - 0.10);
       updaterZUPT->clean_old_imu_measurements(message.timestamp + state->_calib_dt_CAMtoIMU->value()(0) - 0.10);
-      propagator->invalidate_cache(); // 将使用于快速传播的缓存无效化
+      propagator->invalidate_cache(); // 将使用于快速传播的缓存无效化 // todo flag
       return;
     }
   }

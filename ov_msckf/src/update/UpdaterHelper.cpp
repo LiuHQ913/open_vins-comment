@@ -463,6 +463,7 @@ void UpdaterHelper::measurement_compress_inplace(Eigen::MatrixXd &H_x, Eigen::Ve
   // Based on "Matrix Computations 4th Edition by Golub and Van Loan"
   // See page 252, Algorithm 5.2.4 for how these two loops work
   // They use "matlab" index notation, thus we need to subtract 1 from all index
+  // QR分解
   Eigen::JacobiRotation<double> tempHo_GR;
   for (int n = 0; n < H_x.cols(); n++) {
     for (int m = (int)H_x.rows() - 1; m > n; m--) {

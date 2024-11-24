@@ -116,7 +116,7 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state,
   int phi_size = Phi.rows();
   int total_size = state->_Cov.rows();
   // kernel 维护状态变量协方差矩阵
-  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose(); // todo 非对角矩阵块怎么是这个样子呢？ 怎么是GQG的一半？
+  state->_Cov.block(start_id, 0, phi_size, total_size) = Cov_PhiT.transpose(); // todo 非对角矩阵块怎么是这个样子呢？ 怎么是GQG的一半？ // lhq ref.https://docs.openvins.com/update.html
   state->_Cov.block(0, start_id, total_size, phi_size) = Cov_PhiT;
   state->_Cov.block(start_id, start_id, phi_size, phi_size) = Phi_Cov_PhiT;
 
@@ -144,10 +144,15 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state,
 
   //==========================================================
   //==========================================================
-  // Part of the Kalman Gain K = (P*H^T)*S^{-1} = M*S^{-1} 其中S是协方差矩阵 = H*Cov*H' + R
+  // ref.https://docs.openvins.com/update-compress.html
+  // Part of the Kalman Gain ： K = (P*H^T)*S^{-1} = M*S^{-1} 
+  // 其中S是协方差矩阵 = H*Cov*H' + R
   assert(res.rows() == R.rows());
   assert(H.rows() == res.rows());
-  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows()); // 大小：状态量协方差所有行数 x 测量残差行数
+  /*
+    M_a = P*H^T 即 [state->_Cov.rows() * state->_Cov.rows()] X [state->_Cov.rows() * res.rows()]
+  */
+  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows()); // 大小：状态量协方差所有行数(状态量个数*维数) x 测量残差行数(残差个数*维度)
 
   // Get the location in small jacobian for each measuring variable
   int current_it = 0;
@@ -159,10 +164,10 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state,
 
   //==========================================================
   //==========================================================
-  // For each active variable find its M = P*H^T
-  for (const auto &var : state->_variables) {
-    // Sum up effect of each subjacobian = K_i= \sum_m (P_im Hm^T)
-    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows()); // 大小：变量维度数 x 测量残差行数 (如：3xn)
+  // For each active variable find its M = P*H^T 设M表示为P*H^T
+  for (const auto &var : state->_variables) { // 遍历状态量
+    // Sum up effect of each subjacobian = K_i= \sum_m (P_im Hm^T) ; 累计每个子雅可比的影响
+    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows()); // 大小：(单个)变量维度数 x 测量残差行数(残差个数*维数)
     for (size_t i = 0; i < H_order.size(); i++) {
       std::shared_ptr<Type> meas_var = H_order[i]; // 获取排序队列中的变量
       // 如 [3 3] * [n 3]^T , 其中[3 3]是状态变量协方差指定
@@ -185,13 +190,23 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state,
 
   // Invert our S (should we use a more stable method here??)
   Eigen::MatrixXd Sinv = Eigen::MatrixXd::Identity(R.rows(), R.rows());
-  S.selfadjointView<Eigen::Upper>().llt().solveInPlace(Sinv);
+  /*
+    gpt 
+      1. S.selfadjointView<Eigen::Upper>()创建了一个自适应视图，它只访问矩阵的上三角部分，因为S是对称矩阵。
+      2. 调用llt()方法来执行Cholesky分解，这是一种特别适用于对称正定矩阵的数值稳定方法。
+      3. solveInPlace(Sinv)用Cholesky分解的结果来解决方程S * X = I。I由Sinv传入，解X传出在Sinv中
+    gpt 这种方法比直接计算逆矩阵数值上更稳定，尤其是在处理大型矩阵时。
+  */
+  S.selfadjointView<Eigen::Upper>().llt().solveInPlace(Sinv); // code 矩阵求逆
   Eigen::MatrixXd K = M_a * Sinv.selfadjointView<Eigen::Upper>(); // kernel 卡尔曼增益
   // Eigen::MatrixXd K = M_a * S.inverse();
 
-  // Update Covariance // kernel 协方差更新
-  state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();  // P' = P - K * (H * P^T) 其中 P = P^T
-  state->_Cov = state->_Cov.selfadjointView<Eigen::Upper>(); // code Eigen对称矩阵操作，这是个什么用法？
+  // Update Covariance // kernel 协方差更新 P' = P - K * (H * P^T) 其中 P = P^T
+  
+  // code triangularView<Eigen::Upper>()是一个函数，用于获取矩阵的上三角部分。 从state->_Cov的上三角部分减去这个乘积
+  state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();
+  // code 将state->_Cov的上三角部分复制到下三角部分
+  state->_Cov = state->_Cov.selfadjointView<Eigen::Upper>();
   // Cov -= K * M_a.transpose();
   // Cov = 0.5*(Cov+Cov.transpose());
 
@@ -297,7 +312,15 @@ Eigen::MatrixXd StateHelper::get_full_covariance(std::shared_ptr<State> state) {
   return full_cov;
 }
 
-void StateHelper::marginalize(std::shared_ptr<State> state, std::shared_ptr<Type> marg) {
+/*
+  3个地方调用了这个函数：(这个函数也通用函数)
+    1. UpdaterZeroVelocity.cpp {405}
+      参数一：state
+      参数二：state->_clones_IMU.at(time1_cam)
+*/
+void StateHelper::marginalize(std::shared_ptr<State> state, 
+                              std::shared_ptr<Type> marg) 
+{
 
   // Check if the current state has the element we want to marginalize
   if (std::find(state->_variables.begin(), state->_variables.end(), marg) == state->_variables.end()) {
@@ -306,6 +329,7 @@ void StateHelper::marginalize(std::shared_ptr<State> state, std::shared_ptr<Type
     std::exit(EXIT_FAILURE);
   }
 
+  // note openvins中边缘化的逻辑
   // Generic covariance has this form for x_1, x_m, x_2. If we want to remove x_m:
   //
   //  P_(x_1,x_1) P(x_1,x_m) P(x_1,x_2)
@@ -343,7 +367,7 @@ void StateHelper::marginalize(std::shared_ptr<State> state, std::shared_ptr<Type
   // state->Cov() = 0.5*(Cov_new+Cov_new.transpose());
   assert(state->_Cov.rows() == Cov_new.rows());
 
-  // Now we keep the remaining variables and update their ordering
+  // Now we keep the remaining variables and update their ordering // 保留剩余的变量并更新它们的顺序
   // Note: DOES NOT SUPPORT MARGINALIZING SUBVARIABLES YET!!!!!!!
   std::vector<std::shared_ptr<Type>> remaining_variables;
   for (size_t i = 0; i < state->_variables.size(); i++) {
